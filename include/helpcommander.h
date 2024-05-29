@@ -3,10 +3,10 @@
 
 #include "help.h"
 
-void usage();
-bool validate_command(int argc, char** argv, struct hostnet* server);
-void login(int* sock, struct sockaddr_in* server, struct sockaddr* serverptr, struct hostnet* server_info, char* port);
+void usage_commander();
+bool validate_command(int argc, char** argv, struct addrinfo* server);
+void login(int* sock, struct addrinfo* server_info, char* port);
 void send_command(int sock, int argc, char** argv);
-void recieve_response(int sock);
+void recieve_response(int sock, char* command);
 
 #endif /* helpcommander.h */

@@ -12,10 +12,39 @@ bool isNumber(char *str){
 }
 
 /*
+    This function reads the poll message from the server.
+    The format will be : 
+    [length of jobID] [jobID] [length of job] [job]
+*/
+void read_poll_message(void* buffer, char** jobid, char** job){
+    uint32_t length_of_jobid;
+    memcpy(&length_of_jobid, buffer, sizeof(uint32_t));
+    buffer += sizeof(uint32_t);
+    *jobid = malloc(length_of_jobid + 1);
+    if(!(*jobid))
+        print_error_and_die("jobCommander : Error allocating memory for jobid");
+    
+    memcpy(*jobid, buffer, length_of_jobid);
+    (*jobid)[length_of_jobid] = '\0';
+    buffer += length_of_jobid;
+
+    uint32_t length_of_job;
+    memcpy(&length_of_job, buffer, sizeof(uint32_t));
+    buffer += sizeof(uint32_t);
+    *job = malloc(length_of_job + 1);
+    if(!(*job))
+        print_error_and_die("jobCommander : Error allocating memory for job");
+    
+    memcpy(*job, buffer, length_of_job);
+    (*job)[length_of_job] = '\0';
+    buffer += length_of_job;
+}
+
+/*
     This function prints the usage of the jobCommander.
     It prints the available commands and their description.
 */
-void usage(){
+void usage_commander(){
     int white_space1 = 10;
     int white_space2 = 20;
     printf("Usage : ./jobCommander [serverName] [portNum] [jobCommanderInputCommand]\n\n");
@@ -39,16 +68,25 @@ void usage(){
     if the port number is valid one and if the command is one of
     those that are supported by the jobCommander.
 */
-bool validate_command(int argc, char* argv[], struct hostnet* server){
+bool validate_command(int argc, char** argv, struct addrinfo* server_info){
     if(argc < 4){
         return false;
     }
 
+    // Specify the type of the address
+    struct addrinfo hints;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = 0;
+
     // Check if the hostname resolves to an IP address
-    if((server = gethostbyname(argv[1])) == NULL)
+    if(getaddrinfo(argv[1], NULL, &hints, &server_info) != 0)
         return false;
 
     // Check if the port number is valid. 0 to 65535
+    if(!isNumber(argv[2]))
+        return false;
+
     uint32_t port = atoi(argv[2]);
     if(port < 0 || port > 65535)
         return false;
@@ -86,21 +124,19 @@ bool validate_command(int argc, char* argv[], struct hostnet* server){
     This function is used from client to make a connection
     with the server using socket programming. 
 */
-void login(int* sock, struct sockaddr_in* server, struct sockaddr* serverptr, struct hostent* server_info, char* port){
+void login(int* sock, struct addrinfo* server_info, char* port){
     
-    // Create socket
-    if((*sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-        print_error_and_die("jobCommander : Error creating a socket");
+    struct sockaddr *serverptr = (struct sockaddr *)server_info->ai_addr;
 
-    server->sin_family = AF_INET;
-    memcpy(&server->sin_addr, server_info->h_addr, server_info->h_length);
-    server->sin_port = htons(atoi(port));         
+    // Create socket
+    if((*sock = socket(server_info->ai_family, server_info->ai_socktype, server_info->ai_protocol)) < 0)
+        print_error_and_die("jobCommander : Error creating a socket");     
 
     // Initiate connection
-    if(connect(*sock, serverptr, sizeof(*server)) < 0)
+    if(connect(*sock, serverptr, server_info->ai_addrlen) < 0)
         print_error_and_die("jobCommander : Error connecting to the server with hostname %s and port %s\n", server_info->h_name, port);
 
-    printf("jobCommander : Connecting to %s port %s\n", server_info->h_name, port);
+    printf("jobCommander : Connecting to %s port %s\n", server_info->ai_canonname, port);
 }
 
 /*
@@ -144,4 +180,62 @@ void send_command(int sock, int argc, char** argv){
         print_error_and_die("jobCommander : Error writing the message to the server");
 
     free(message);
+}
+
+/*
+    This function reads the response from the server.
+    The client is responsible to get message response
+    from the server and wait for the result of the UNIX 
+    command if the command was issueJob.
+*/
+void recieve_response(int sock, char* command){
+    
+    void* buffer;
+
+    if((strcmp(command, "exit") == 0) || (strcmp(command, "stop") == 0) || (strcmp(command, "setConcurrency") == 0)){
+        if(m_read(sock, buffer) == -1)
+            print_error_and_die("jobCommander : Error reading the EXIT message from the server");
+        
+        // Get pass the length of the message
+        char* response = (char*)(buffer + sizeof(uint32_t));
+        printf("jobCommander : %s\n", response);
+    }
+    else if(strcmp(command, "poll") == 0){
+        if(m_read(sock, buffer) == -1)
+            print_error_and_die("jobCommander : Error reading the POLL message from the server");
+        
+        // Parse the buffer and print the results
+        // The format will be : 
+        // [number of jobs] [length of jobID] [jobID] [length of job] [job]
+        // This is done repeatedly until the whole buffer is read
+        uint32_t length_of_message;
+        memcpy(&length_of_message, buffer, sizeof(uint32_t));
+        buffer += sizeof(uint32_t);
+        uint32_t number_of_jobs;
+        memcpy(&number_of_jobs, buffer, sizeof(uint32_t));
+        buffer += sizeof(uint32_t);
+        printf("jobCommander : POLL\n");
+
+        for(int i = 0; i < number_of_jobs; i++){
+            char* jobid;
+            char* job;
+
+            read_poll_message(buffer, &jobid, &job);
+            printf("<%s , %s>\n", jobid, job);
+            
+            free(jobid);
+            free(job);
+        }
+
+    }
+    else{   // TODO : issueJob
+
+    }
+
+    // If allocation wasn't successful then the 
+    // program will have already exited
+    free(buffer);
+
+    if(m_close(sock) == -1)
+        print_error_and_die("jobCommander : Error closing the socket");
 }

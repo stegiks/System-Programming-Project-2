@@ -6,28 +6,25 @@
 */
 int main(int argc, char* argv[]){
 
-    struct hostnet* server_info = NULL;
+    struct addrinfo *server_info;
 
-    if(!validate_command(argc, argv, server_info)){
+    if(!validate_command(argc, argv, server_info)){ 
         usage();
         print_error_and_die("Invalid command line arguments");
     }
 
     // Create a connection using the given hostname and port
-    struct sockaddr_in server;
-    struct sockaddr *serverptr = (struct sockaddr*)&server;
     int sock;
-    login(&sock, &server, serverptr, server_info, argv[2]);
+    login(&sock, server_info, argv[2]);
+
+    // Free the memory allocated for server_info
+    freeaddrinfo(server_info);
 
     send_command(sock, argc, argv);
 
-    recieve_response(sock);
-
-    close(sock);
+    recieve_response(sock, argv[3]);
 
     return 0;
 }
 
-// TODO : implement recieve_response
-// TODO : implement help functions like m_read, m_close
 // TODO : after that start with the server side
