@@ -71,8 +71,9 @@ ssize_t m_read(int fd, void* buffer){
         return -1;
     
     // Write the length of the message to the buffer
-    memcpy(buffer, &total_length, sizeof(uint32_t));
-    buffer += sizeof(uint32_t);
+    void* temp = buffer;
+    memcpy(temp, &total_length, sizeof(uint32_t));
+    temp += sizeof(uint32_t);
     
     // Then read the actual message
     uint32_t bytes_read = 0;

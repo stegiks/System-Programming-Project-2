@@ -40,6 +40,7 @@ void read_poll_message(void* buffer, char** jobid, char** job){
     buffer += length_of_job;
 }
 
+
 /*
     This function prints the usage of the jobCommander.
     It prints the available commands and their description.
@@ -142,7 +143,7 @@ void login(int* sock, struct addrinfo* server_info, char* port){
 /*
     Send the command to the server for processing.
     The writing format is: 
-    [length of message] [num of args] [command length] [length of 1st command] [1st command] ...
+    [length of message] [num of args] [length of 1st command] [1st command] ...
     This is done repeatedly until the whole command is sent.
 */
 void send_command(int sock, int argc, char** argv){
@@ -155,7 +156,7 @@ void send_command(int sock, int argc, char** argv){
     // Allocate memory for the message
     uint32_t actual_number_of_args = argc - 3;
     uint32_t total_length = sizeof(uint32_t) + sizeof(uint32_t) + command_length;
-    void* message = malloc(total_length);
+    void* message = malloc(total_length + sizeof(uint32_t));
     if(!message)
         print_error_and_die("jobCommander : Error allocating memory for the message");
     
@@ -164,8 +165,6 @@ void send_command(int sock, int argc, char** argv){
     memcpy(temp, &total_length, sizeof(uint32_t));
     temp += sizeof(uint32_t);
     memcpy(temp, &actual_number_of_args, sizeof(uint32_t));
-    temp += sizeof(uint32_t);
-    memcpy(temp, &command_length, sizeof(uint32_t));
     temp += sizeof(uint32_t);
     for(int i = 3; i < argc; i++){
         size_t length = strlen(argv[i]);
@@ -206,29 +205,83 @@ void recieve_response(int sock, char* command){
         
         // Parse the buffer and print the results
         // The format will be : 
-        // [number of jobs] [length of jobID] [jobID] [length of job] [job]
-        // This is done repeatedly until the whole buffer is read
+        // [length_of_message] [number of jobs] [length of jobID] [jobID] [length of job] [job] ... OR
+        // [length_of_message] [number of jobs] [message]
+        void* buffer_ptr = buffer;
         uint32_t length_of_message;
-        memcpy(&length_of_message, buffer, sizeof(uint32_t));
-        buffer += sizeof(uint32_t);
+        memcpy(&length_of_message, buffer_ptr, sizeof(uint32_t));
+        buffer_ptr += sizeof(uint32_t);
+
         uint32_t number_of_jobs;
-        memcpy(&number_of_jobs, buffer, sizeof(uint32_t));
-        buffer += sizeof(uint32_t);
+        memcpy(&number_of_jobs, buffer_ptr, sizeof(uint32_t));
+        buffer_ptr += sizeof(uint32_t);
         printf("jobCommander : POLL\n");
 
-        for(int i = 0; i < number_of_jobs; i++){
-            char* jobid;
-            char* job;
-
-            read_poll_message(buffer, &jobid, &job);
-            printf("<%s , %s>\n", jobid, job);
+        if(number_of_jobs == 0){
+            uint32_t len_response = length_of_message - sizeof(uint32_t);
+            char* response = malloc(len_response + 1);
+            if(!response)
+                print_error_and_die("jobCommander : Error allocating memory for response");
             
-            free(jobid);
-            free(job);
+            memcpy(response, buffer, len_response);
+            response[len_response] = '\0';
+            
+            printf("%s\n", response);
+            free(response);
+        }
+        else{
+            for(int i = 0; i < number_of_jobs; i++){
+                char* jobid;
+                char* job;
+
+                read_poll_message(buffer_ptr, &jobid, &job);
+                printf("<%s , %s>\n", jobid, job);
+                
+                free(jobid);
+                free(job);
+            }
         }
 
     }
-    else{   // TODO : issueJob
+    else{
+        // Format of the response will be :
+        // [length of message1] [message1] [length of message2] [message2]
+        if(m_read(sock, buffer) == -1)
+            print_error_and_die("jobCommander : Error reading the first message from the server");
+        
+        void* buffer_ptr = buffer; 
+        uint32_t length_of_message;
+        memcpy(&length_of_message, buffer_ptr, sizeof(uint32_t));
+        buffer_ptr += sizeof(uint32_t);
+
+        // Allocate memory for string message
+        char* response = malloc(length_of_message + 1);
+        if(!response)
+            print_error_and_die("jobCommander : Error allocating memory for the response message");
+        
+        memcpy(response, buffer, length_of_message);
+        response[length_of_message] = '\0';
+        printf("%s\n", response);
+        free(response);
+        free(buffer);
+
+        // Second read
+        if(m_read(sock, buffer) == -1)
+            print_error_and_die("jobCommander : Error reading the second message from the server");
+        
+        buffer_ptr = buffer;
+        memset(&length_of_message, 0, sizeof(uint32_t));
+        memcpy(&length_of_message, buffer_ptr, sizeof(uint32_t));
+        buffer_ptr += sizeof(uint32_t);
+
+        response = malloc(length_of_message + 1);
+        if(!response)
+            print_error_and_die("jobCommander : Error allocating memory for the response message");
+        
+        memcpy(response, buffer_ptr, length_of_message);
+        response[length_of_message] = '\0';
+        printf("%s\n", response);
+        free(response);
 
     }
 
