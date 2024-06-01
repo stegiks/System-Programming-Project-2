@@ -1,10 +1,18 @@
 #include "../include/helpserver.h"
 
+bool terminate = false;
+int active_controller_threads = 0;
+int worker_threads_working = 0;
 List buffer_with_tasks = NULL;
+pthread_t* worker_trheads;
 uint32_t buffer_size;
+uint32_t thread_pool_size;
 pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t terminate_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t buffer_not_full = PTHREAD_COND_INITIALIZER;
 pthread_cond_t buffer_not_empty = PTHREAD_COND_INITIALIZER;
+pthread_cond_t terminate_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t worker_cond = PTHREAD_COND_INITIALIZER;
 
 /*
     Main function for multi-threaded server where arguments
@@ -19,26 +27,39 @@ int main(int argc, char* argv[]){
 
     uint16_t port = atoi(argv[1]);
     buffer_size = atoi(argv[2]);
-    uint32_t threadPoolSize = atoi(argv[3]);
+    thread_pool_size = atoi(argv[3]);
 
     // Create the buffer as a List and the worker threads
     buffer_with_tasks = createList(buffer_size);
     
-    pthread_t worker_threads[threadPoolSize];
-    for(int i = 0; i < threadPoolSize; i++)
-        if(pthread_create(worker_threads[i], NULL, worker_function, NULL))
+    worker_trheads = malloc(thread_pool_size * sizeof(pthread_t));
+    for(int i = 0; i < thread_pool_size; i++)
+        if(pthread_create(&worker_trheads[i], NULL, worker_function, NULL))
             print_error_and_die("jobExecutorServer : Error creating worker thread number %d", i);
     
     // Create socket, bind and listen
     int sock_server;
     create_connection(&sock_server, port);
 
-    // While loop that accepts connections and creates controller threads
+    // While loop that accepts connections and creates controller threads.
+    // Before that it checks for termination.
     while(1){
+
+        pthread_mutex_lock(&terminate_mutex);
+        if(terminate){
+            if(active_controller_threads > 0)
+                pthread_cond_wait(&terminate_cond, &terminate_mutex);
+            
+            pthread_mutex_unlock(&terminate_mutex);
+            break;
+        }
+        pthread_mutex_unlock(&terminate_mutex);
+
         int client_sock;
         if((client_sock = accept(sock_server, NULL, NULL)) < 0)
             print_error_and_die("jobExecutorServer : Error accepting connection");
 
+        // Gets freed in controller_function immediately
         int* pclient_sock = malloc(sizeof(int));
         if(!pclient_sock)
             print_error_and_die("jobExecutorServer : Error allocating memory for pclient_sock");
@@ -46,8 +67,19 @@ int main(int argc, char* argv[]){
         *pclient_sock = client_sock;
 
         pthread_t controller_thread;
-        pthread_create(&controller_thread, NULL, controller_function, pclient_sock);
+        if(pthread_create(&controller_thread, NULL, controller_function, pclient_sock))
+            print_error_and_die("jobExecutorServer : Error creating controller thread");
+        
+        if(pthread_detach(controller_thread))
+            print_error_and_die("jobExecutorServer : Error detaching controller thread");
     }
+
+    // Check if some controller threads managed to put 
+    // their jobs in the buffer after exit command was sent.
+    termination();
+
+    printf("I AM YOUR FATHER...\n");
+    printf("NOOOOO\n");
 
     return 0;
 }

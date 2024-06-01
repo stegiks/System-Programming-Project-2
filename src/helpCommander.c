@@ -244,44 +244,68 @@ void recieve_response(int sock, char* command){
 
     }
     else{
-        // Format of the response will be :
-        // [length of message1] [message1] [length of message2] [message2]
-        if(m_read(sock, buffer) == -1)
-            print_error_and_die("jobCommander : Error reading the first message from the server");
-        
-        void* buffer_ptr = buffer; 
-        uint32_t length_of_message;
-        memcpy(&length_of_message, buffer_ptr, sizeof(uint32_t));
-        buffer_ptr += sizeof(uint32_t);
+        // Format will be : [length of chunk] [chunk] ...
+        char* worker_response;
+        int size_of_worker_response = 0;
+        uint16_t both = 0;
+        while(1){
+            if(m_read(sock, buffer) == -1)
+                print_error_and_die("jobCommander : Error reading the response from the server");
+            
+            // Get the length of the chunk
+            uint32_t length_of_chunk;
+            void* buffer_ptr = buffer;
+            memcpy(&length_of_chunk, buffer_ptr, sizeof(uint32_t));
+            buffer_ptr += sizeof(uint32_t);
 
-        // Allocate memory for string message
-        char* response = malloc(length_of_message + 1);
-        if(!response)
-            print_error_and_die("jobCommander : Error allocating memory for the response message");
-        
-        memcpy(response, buffer, length_of_message);
-        response[length_of_message] = '\0';
-        printf("%s\n", response);
-        free(response);
-        free(buffer);
+            // Allocate memory for the chunk
+            char* chunk = malloc(length_of_chunk + 1);
+            if(!chunk)
+                print_error_and_die("jobCommander : Error allocating memory for chunk");
+            
+            // Copy the chunk to the buffer
+            memcpy(chunk, buffer_ptr, length_of_chunk);
+            chunk[length_of_chunk] = '\0';
 
-        // Second read
-        if(m_read(sock, buffer) == -1)
-            print_error_and_die("jobCommander : Error reading the second message from the server");
-        
-        buffer_ptr = buffer;
-        memset(&length_of_message, 0, sizeof(uint32_t));
-        memcpy(&length_of_message, buffer_ptr, sizeof(uint32_t));
-        buffer_ptr += sizeof(uint32_t);
+            if(strncmp(chunk, "JOB <", 5) == 0){
+                // Controller thread response
+                printf("%s\n", chunk);
+                both++;
+                if(both == 2){
+                    free(chunk);
+                    break;
+                }
+            }
+            else{
+                // Chunk from worker thread. Reallocate for worker_response
+                size_of_worker_response += length_of_chunk;
+                worker_response = realloc(worker_response, size_of_worker_response);
+                if(!worker_response)
+                    print_error_and_die("jobCommander : Error reallocating memory for worker_response");
+                
+                strcat(worker_response, chunk);
+            }
 
-        response = malloc(length_of_message + 1);
-        if(!response)
-            print_error_and_die("jobCommander : Error allocating memory for the response message");
-        
-        memcpy(response, buffer_ptr, length_of_message);
-        response[length_of_message] = '\0';
-        printf("%s\n", response);
-        free(response);
+            if(strncmp(chunk, "-----", 5) == 0){
+                // Worker thread response
+                worker_response = realloc(worker_response, size_of_worker_response + 1);
+                if(!worker_response)
+                    print_error_and_die("jobCommander : Error reallocating memory for worker_response");
+                
+                worker_response[size_of_worker_response] = '\0';
+                printf("%s\n", worker_response);
+                free(worker_response);
+
+                both++;
+                if(both == 2){
+                    free(chunk);
+                    break;
+                }
+            }
+
+            free(chunk);
+            // ! MALLON FINITO !
+        }
 
     }
 
