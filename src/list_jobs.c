@@ -57,6 +57,20 @@ void appendJob(List list, Job job){
 }
 
 /*
+    Returns the first ListNode in the list
+*/
+ListNode dequeueJob(List list){
+    if(isEmpty(list))
+        return NULL;
+    
+    ListNode first = list->head;
+    list->head = first->next;
+    list->size--;
+
+    return first;
+}
+
+/*
     Remove a job from the list
 */
 void removeJob(List list, char* jobid){

@@ -9,6 +9,7 @@ uint32_t buffer_size;
 uint32_t thread_pool_size;
 pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t terminate_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t global_vars_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t buffer_not_full = PTHREAD_COND_INITIALIZER;
 pthread_cond_t buffer_not_empty = PTHREAD_COND_INITIALIZER;
 pthread_cond_t terminate_cond = PTHREAD_COND_INITIALIZER;
@@ -24,6 +25,7 @@ int main(int argc, char* argv[]){
         print_error_and_die("jobExecutorServer : Invalid command line arguments\n"
         "Usage: ./jobExecutorServer [portnum] [buffersize] [threadPoolSize]\n");
     }
+    printf("Arguments are valid\n");
 
     uint16_t port = atoi(argv[1]);
     buffer_size = atoi(argv[2]);
@@ -33,16 +35,18 @@ int main(int argc, char* argv[]){
     buffer_with_tasks = createList(buffer_size);
     
     worker_trheads = malloc(thread_pool_size * sizeof(pthread_t));
-    for(int i = 0; i < thread_pool_size; i++)
+    for(uint32_t i = 0; i < thread_pool_size; i++)
         if(pthread_create(&worker_trheads[i], NULL, worker_function, NULL))
             print_error_and_die("jobExecutorServer : Error creating worker thread number %d", i);
     
+    printf("Buffer and worker threads created\n");
     // Create socket, bind and listen
     int sock_server;
     create_connection(&sock_server, port);
 
     // While loop that accepts connections and creates controller threads.
     // Before that it checks for termination.
+    printf("Server is ready to accept connections\n");
     while(1){
 
         pthread_mutex_lock(&terminate_mutex);
@@ -56,6 +60,7 @@ int main(int argc, char* argv[]){
         pthread_mutex_unlock(&terminate_mutex);
 
         int client_sock;
+        printf("Waiting for connection...\n");
         if((client_sock = accept(sock_server, NULL, NULL)) < 0)
             print_error_and_die("jobExecutorServer : Error accepting connection");
 

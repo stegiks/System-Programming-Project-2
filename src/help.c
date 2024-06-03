@@ -1,6 +1,17 @@
 #include "../include/help.h"
 
 /*
+    This functions checks if a string is a number.
+*/
+bool isNumber(const char *str){
+    for(size_t i = 0; i < strlen(str); i++)
+        if(!isdigit(str[i]))
+            return false;
+        
+    return true;
+}
+
+/*
     This function prints an error message and exits 
     the program. Also prints errno if available
 */

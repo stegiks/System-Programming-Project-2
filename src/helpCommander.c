@@ -1,17 +1,6 @@
 #include "../include/helpcommander.h"
 
 /*
-    This functions checks if a string is a number.
-*/
-bool isNumber(char *str){
-    for(int i = 0; i < strlen(str); i++)
-        if(!isdigit(str[i]))
-            return false;
-        
-    return true;
-}
-
-/*
     This function reads the poll message from the server.
     The format will be : 
     [length of jobID] [jobID] [length of job] [job]
@@ -69,55 +58,69 @@ void usage_commander(){
     if the port number is valid one and if the command is one of
     those that are supported by the jobCommander.
 */
-bool validate_command(int argc, char** argv, struct addrinfo* server_info){
+bool validate_command(int argc, char** argv, struct addrinfo** server_info){
     if(argc < 4){
+        printf("jobCommander : Invalid number of arguments\n");
         return false;
     }
 
-    // Specify the type of the address
-    struct addrinfo hints;
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = 0;
-
-    // Check if the hostname resolves to an IP address
-    if(getaddrinfo(argv[1], NULL, &hints, &server_info) != 0)
-        return false;
-
     // Check if the port number is valid. 0 to 65535
-    if(!isNumber(argv[2]))
+    if(!isNumber(argv[2])){
+        printf("jobCommander : Port number must be a number\n");
         return false;
+    }
 
-    uint32_t port = atoi(argv[2]);
+    int port = atoi(argv[2]);
     if(port < 0 || port > 65535)
         return false;
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_flags = AI_CANONNAME;
     
+    // Check if the hostname resolves to an IP address
+    if(getaddrinfo(argv[1], NULL, &hints, server_info) != 0){
+        printf("jobCommander : Hostname %s does not resolve to an IP address\n", argv[1]);
+        return false;
+    }
+
     // Check if the command is one of those that are supported by the jobCommander
     char* command = argv[3];
 
     if((strcmp(command, "issueJob") == 0) && (argc < 5)){
+        printf("jobCommander : issueJob command must have a job\n");
         return false;
     }
     else if(strcmp(command, "setConcurrency") == 0){
-        if(argc < 5)
+        if(argc < 5){
+            printf("jobCommander : setConcurrency command must have a number\n");
             return false;
+        }
         
-        if(!isNumber(argv[4]))
+        if(!isNumber(argv[4])){
+            printf("jobCommander : setConcurrency command must have a number\n");
             return false;
+        }
         
         int N = atoi(argv[4]);
-        if(N < 1)
+        if(N < 1){
+            printf("jobCommander : N must be greater than 0\n");
             return false;
+        }
     }
     else if(strcmp(command, "stop") == 0){
-        if(argc != 5)
+        if(argc != 5){
+            printf("jobCommander : stop command must have a jobID\n");
             return false;
+        }
     }
     else if((strcmp(command, "poll") == 0) || (strcmp(command, "exit") == 0)){
-        if(argc != 4)
+        if(argc != 4){
+            printf("jobCommander : %s command must not have any arguments\n", command);
             return false;
+        }
     }
-
+    printf("jobCommander : Valid command\n");
     return true;
 }
 
@@ -125,19 +128,27 @@ bool validate_command(int argc, char** argv, struct addrinfo* server_info){
     This function is used from client to make a connection
     with the server using socket programming. 
 */
-void login(int* sock, struct addrinfo* server_info, char* port){
+void login(int* sock, struct addrinfo** server_info, char* port){
     
-    struct sockaddr *serverptr = (struct sockaddr *)server_info->ai_addr;
+    struct sockaddr *serverptr = (struct sockaddr *)(*server_info)->ai_addr;
+
+    if(!serverptr)
+        print_error_and_die("jobCommander : Error getting the server address");
 
     // Create socket
-    if((*sock = socket(server_info->ai_family, server_info->ai_socktype, server_info->ai_protocol)) < 0)
+    printf("jobCommander : Creating a socket\n");
+    if((*sock = socket((*server_info)->ai_family, (*server_info)->ai_socktype, (*server_info)->ai_protocol)) < 0)
         print_error_and_die("jobCommander : Error creating a socket");     
 
-    // Initiate connection
-    if(connect(*sock, serverptr, server_info->ai_addrlen) < 0)
-        print_error_and_die("jobCommander : Error connecting to the server with hostname %s and port %s\n", server_info->h_name, port);
+    printf("jobCommander : Socket created\n");
 
-    printf("jobCommander : Connecting to %s port %s\n", server_info->ai_canonname, port);
+    // Initiate connection
+    if(connect(*sock, serverptr, (*server_info)->ai_addrlen) < 0)
+        print_error_and_die("jobCommander : Error connecting to the server with hostname %s and port %s\n", (*server_info)->ai_canonname, port);
+
+    printf("jobCommander : Connected to server\n");
+
+    printf("jobCommander : Connecting to %s port %s\n", (*server_info)->ai_canonname, port);
 }
 
 /*
@@ -189,7 +200,7 @@ void send_command(int sock, int argc, char** argv){
 */
 void recieve_response(int sock, char* command){
     
-    void* buffer;
+    void* buffer = NULL;
 
     if((strcmp(command, "exit") == 0) || (strcmp(command, "stop") == 0) || (strcmp(command, "setConcurrency") == 0)){
         if(m_read(sock, buffer) == -1)
@@ -230,7 +241,7 @@ void recieve_response(int sock, char* command){
             free(response);
         }
         else{
-            for(int i = 0; i < number_of_jobs; i++){
+            for(uint32_t i = 0; i < number_of_jobs; i++){
                 char* jobid;
                 char* job;
 

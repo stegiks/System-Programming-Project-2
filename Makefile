@@ -18,9 +18,9 @@ ARGS_SER := 4321
 CFLAGS := -Wall -Wextra -Werror -g -pthread -lrt -I$(INCLUDE)
 
 # Targets
-SRC_FILES := $(wildcard $(SCR)/%.c)
+SRC_FILES := $(wildcard $(SRC)/*.c)
 OBJ_FILES := $(patsubst $(SRC)/%.c,$(BUILD)/%.o,$(SRC_FILES))
-COMMANDER_OBJ_FILES := $(filter-out $(BUILD)/jobExecutorServer.o $(BUILD)/helpExecutor.o $(OBJ_FILES))
+COMMANDER_OBJ_FILES := $(filter-out $(BUILD)/jobExecutorServer.o $(BUILD)/helpServer.o $(BUILD)/list_jobs.o, $(OBJ_FILES))
 SERVER_OBJ_FILES := $(filter-out $(BUILD)/jobCommander.o $(BUILD)/helpCommander.o, $(OBJ_FILES))
 
 # Compilation
@@ -31,10 +31,10 @@ $(BUILD)/%.o: $(SRC)/%.c
 
 # Linking
 $(BIN)/jobCommander: $(COMMANDER_OBJ_FILES)
-	$(CC) $^ -o $@
+	$(CC) $^ -o $@  $(CFLAGS)
 
-$(BIN)/jobExecutorServer: $(SERVER_OBJ_FILES)
-	$(CC) $^ -o $@
+$(BIN)/jobExecutorServer: $(SERVER_OBJ_FILES) 
+	$(CC) $^ -o $@ $(CFLAGS)
 
 run_commander: $(BIN)/jobCommander
 	$(BIN)/jobCommander $(ARGS_COM)

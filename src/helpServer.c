@@ -1,7 +1,7 @@
 #include "../include/helpserver.h"
 
 uint32_t id = 1;
-uint32_t concurrency = 1;
+int concurrency = 1;
 
 /*
     This function finds the number of digits in a number
@@ -52,7 +52,7 @@ void constructArgsArray(void* buffer, uint32_t number_of_args, char** arguments,
     
     uint32_t length_of_whole_command;
     // Arguments array
-    for(int i = 0; i < number_of_args; i++){
+    for(uint32_t i = 0; i < number_of_args; i++){
         size_t length_of_arg;
         memcpy(&length_of_arg, buffer, sizeof(size_t));
         buffer += sizeof(size_t);
@@ -77,7 +77,7 @@ void constructArgsArray(void* buffer, uint32_t number_of_args, char** arguments,
         print_error_and_die("jobExecutorServer : Error allocating memory for command");
     
     char* temp = command;
-    for(int i = 0; i < number_of_args; i++){
+    for(uint32_t i = 0; i < number_of_args; i++){
         strncpy(temp, arguments[i], strlen(arguments[i]));
         temp += strlen(arguments[i]);
 
@@ -96,16 +96,19 @@ void constructArgsArray(void* buffer, uint32_t number_of_args, char** arguments,
 /*
     Issue a job to the buffer and respond to the client.
 */
-void issueJob(void* buffer, int client_sock, uint32_t length_of_message, uint32_t number_of_args){
+void issueJob(void* buffer, int client_sock, uint32_t number_of_args){
     // Create a new job for the List-Buffer
     Job job = (Job)malloc(sizeof(*job));
 
     // Job ID
+    pthread_mutex_lock(&global_vars_mutex);
     uint64_t digits = find_digits(id);
     job->jobid = (char*)malloc(digits + 5);
     sprintf(job->jobid, "job_%d", id);
     job->jobid[digits + 4] = '\0';
+
     id++;
+    pthread_mutex_unlock(&global_vars_mutex);
 
     // Number of arguments and file descriptor
     job->number_of_args = number_of_args;
@@ -165,7 +168,19 @@ void setConcurrency(void* buffer, int client_sock){
     memcpy(new_concurrency, buffer, length_of_concurrency);
     new_concurrency[length_of_concurrency] = '\0';
 
+    pthread_mutex_lock(&global_vars_mutex);
+    int old_concurrency = concurrency;
     concurrency = atoi(new_concurrency);
+
+    // Signal the worker threads to check the new concurrency
+    int threads_to_signal = concurrency - old_concurrency;
+    if(threads_to_signal > 0){
+        pthread_mutex_lock(&buffer_mutex);
+        for(int i = 0; i < threads_to_signal; i++)
+            pthread_cond_signal(&worker_cond);
+        
+        pthread_mutex_unlock(&buffer_mutex);
+    }
 
     // Send the response : CONCURRENCY SET AT Ν
     uint32_t lenght_of_response = 19 + find_digits(concurrency);
@@ -183,6 +198,7 @@ void setConcurrency(void* buffer, int client_sock){
         print_error_and_die("jobExecutorServer : Error allocating memory for message");
     
     sprintf(message, "CONCURRENCY SET AT %d", concurrency);
+    pthread_mutex_unlock(&global_vars_mutex);
     message[lenght_of_response] = '\0';
     memcpy(response, message, lenght_of_response);
 
@@ -216,7 +232,7 @@ void stopJob(void* buffer, int client_sock){
     bool found = false;
     while(current != NULL){
         if(strcmp(current->job->jobid, jobid) == 0){
-            removeJob(buffer_with_tasks, current->job);
+            removeJob(buffer_with_tasks, current->job->jobid);
             found = true;
             break;
         }
@@ -421,7 +437,7 @@ void exitServer(int client_sock){
 
         ListNode temp = current;
         current = current->next;
-        removeJob(buffer_with_tasks, temp->job);
+        removeJob(buffer_with_tasks, temp->job->jobid);
     }
     pthread_mutex_unlock(&buffer_mutex);
 }
@@ -449,7 +465,7 @@ void* controller_function(void* arg){
 
     // Handle each command differently
     if(strcmp(command, "issueJob") == 0){
-        issueJob(buffer_ptr, client_sock, length_of_message, number_of_args);
+        issueJob(buffer_ptr, client_sock, number_of_args);
     }
     else if(strcmp(command, "setConcurrency") == 0){
         setConcurrency(buffer_ptr, client_sock);
@@ -460,7 +476,7 @@ void* controller_function(void* arg){
     else if(strcmp(command, "poll") == 0){
         pollJob(client_sock);
     }
-    else{   // exit // TODO
+    else{   // exit 
         exitServer(client_sock);
     }
 
@@ -485,7 +501,7 @@ void* controller_function(void* arg){
     They take a job from the buffer and make use of fork and exec 
     system calls. After the job is done they send the result to the client.
 */
-void* worker_function(void* arg){
+void* worker_function(){
     while(1){
         // Check for termination
         pthread_mutex_lock(&terminate_mutex);
@@ -501,11 +517,14 @@ void* worker_function(void* arg){
             pthread_cond_wait(&buffer_not_empty, &buffer_mutex);
 
         // Check if concurrency level let us handle the job
+        // ! Using buffer_mutex here may be wrong !!!
+        pthread_mutex_lock(&global_vars_mutex);
         if(worker_threads_working >= concurrency)
             pthread_cond_wait(&worker_cond, &buffer_mutex);
         
         worker_threads_working++;
-        listjob = removeFirstJob(buffer_with_tasks);
+        pthread_mutex_unlock(&global_vars_mutex);
+        listjob = dequeueJob(buffer_with_tasks);
         pthread_cond_signal(&buffer_not_full);
         
         pthread_mutex_unlock(&buffer_mutex);
@@ -589,7 +608,9 @@ void* worker_function(void* arg){
             remove(filename);
             free(filename);
             // In the end!
+            pthread_mutex_lock(&global_vars_mutex);
             worker_threads_working--;
+            pthread_mutex_unlock(&global_vars_mutex);
             pthread_cond_signal(&worker_cond);
         }
         else{

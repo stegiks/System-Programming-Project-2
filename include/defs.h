@@ -19,5 +19,6 @@
 #include <fcntl.h>      // Might be needed for pid_t
 #include <stdbool.h>
 #include <stdarg.h>     // For variadic functions
+#include <ctype.h>
 
 #endif /* defs.h */

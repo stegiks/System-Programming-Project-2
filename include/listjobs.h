@@ -31,6 +31,7 @@ List createList(uint32_t max_size);
 bool isEmpty(List list);
 bool isFull(List list);
 void appendJob(List list, Job job);
+ListNode dequeueJob(List list);
 void removeJob(List list, char* jobid);
 void cleanList(List list);
 
