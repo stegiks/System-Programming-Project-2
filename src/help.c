@@ -39,6 +39,9 @@ ssize_t m_write(int fd, const void* buffer, uint32_t total_length){
     uint32_t bytes_left = total_length;
     ssize_t n;
 
+    if(write(fd, &total_length, sizeof(uint32_t)) == -1)
+        return -1;
+
     while(bytes_written < total_length){
         n = write(fd, buffer + bytes_written, bytes_left);
         if(n == -1){
@@ -67,7 +70,7 @@ ssize_t m_write(int fd, const void* buffer, uint32_t total_length){
     represent the length of the message and then read
     the actual message.
 */
-ssize_t m_read(int fd, void* buffer){
+ssize_t m_read(int fd, void** buffer){
     uint32_t total_length;
     ssize_t n;
 
@@ -75,22 +78,23 @@ ssize_t m_read(int fd, void* buffer){
     while((n = read(fd, &total_length, sizeof(uint32_t))) == -1)
         if(errno != EINTR)
             return -1;
+    
+    printf("m_read : Total length is = %d\n", total_length);
 
     // Allocate memory for the message
-    buffer = malloc(total_length + sizeof(uint32_t));
-    if(!buffer)
+    *buffer = malloc(total_length);
+    if(!(*buffer))
         return -1;
     
     // Write the length of the message to the buffer
-    void* temp = buffer;
-    memcpy(temp, &total_length, sizeof(uint32_t));
-    temp += sizeof(uint32_t);
+    memcpy(*buffer, &total_length, sizeof(uint32_t));
     
     // Then read the actual message
-    uint32_t bytes_read = 0;
-    uint32_t bytes_left = total_length;
+    uint32_t bytes_read = sizeof(uint32_t);
+    uint32_t bytes_left = total_length - sizeof(uint32_t);
     while(bytes_read < total_length){
-        n = read(fd, buffer + bytes_read, bytes_left);
+        n = read(fd, (*buffer) + bytes_read, bytes_left);
+        printf("m_read : Read another %ld bytes\n", n);
         if(n == -1){
             if(errno == EINTR){
                 // read interrupted by signal, retry
@@ -108,6 +112,7 @@ ssize_t m_read(int fd, void* buffer){
         bytes_left -= n;
     }
 
+    printf("returning\n");
     return bytes_read;
 }
 

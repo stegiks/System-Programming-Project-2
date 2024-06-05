@@ -11,8 +11,8 @@ CXX := g++
 
 # Arguments for programs (IP and port)
 # Default values are
-ARGS_COM := linux14.di.uoa.gr 4321
-ARGS_SER := 4321
+ARGS_COM := localhost 8000 issueJob ls
+ARGS_SER := 8000 10 2
 
 # Flags and includes. Threads are needed so we add -pthread -lrt
 CFLAGS := -Wall -Wextra -Werror -g -pthread -lrt -I$(INCLUDE)

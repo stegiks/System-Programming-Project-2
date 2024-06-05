@@ -44,6 +44,8 @@ int main(int argc, char* argv[]){
     int sock_server;
     create_connection(&sock_server, port);
 
+    printf("Server listening on port %d\n", port);
+
     // While loop that accepts connections and creates controller threads.
     // Before that it checks for termination.
     printf("Server is ready to accept connections\n");

@@ -74,12 +74,17 @@ bool validate_command(int argc, char** argv, struct addrinfo** server_info){
     if(port < 0 || port > 65535)
         return false;
 
+
     struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
+    bzero(&hints, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = 0;
     hints.ai_flags = AI_CANONNAME;
+    printf("jobCommander : Checking if hostname resolves to an IP address\n");
     
     // Check if the hostname resolves to an IP address
-    if(getaddrinfo(argv[1], NULL, &hints, server_info) != 0){
+    if(getaddrinfo(argv[1], argv[2], &hints, server_info) != 0){
         printf("jobCommander : Hostname %s does not resolve to an IP address\n", argv[1]);
         return false;
     }
@@ -120,6 +125,7 @@ bool validate_command(int argc, char** argv, struct addrinfo** server_info){
             return false;
         }
     }
+
     printf("jobCommander : Valid command\n");
     return true;
 }
@@ -132,9 +138,6 @@ void login(int* sock, struct addrinfo** server_info, char* port){
     
     struct sockaddr *serverptr = (struct sockaddr *)(*server_info)->ai_addr;
 
-    if(!serverptr)
-        print_error_and_die("jobCommander : Error getting the server address");
-
     // Create socket
     printf("jobCommander : Creating a socket\n");
     if((*sock = socket((*server_info)->ai_family, (*server_info)->ai_socktype, (*server_info)->ai_protocol)) < 0)
@@ -145,8 +148,6 @@ void login(int* sock, struct addrinfo** server_info, char* port){
     // Initiate connection
     if(connect(*sock, serverptr, (*server_info)->ai_addrlen) < 0)
         print_error_and_die("jobCommander : Error connecting to the server with hostname %s and port %s\n", (*server_info)->ai_canonname, port);
-
-    printf("jobCommander : Connected to server\n");
 
     printf("jobCommander : Connecting to %s port %s\n", (*server_info)->ai_canonname, port);
 }
@@ -171,10 +172,10 @@ void send_command(int sock, int argc, char** argv){
     if(!message)
         print_error_and_die("jobCommander : Error allocating memory for the message");
     
+    printf("Total length = %d\n", total_length);
+    printf("Command length = %d\n", command_length);
     // Construct the message for writing
     void* temp = message;
-    memcpy(temp, &total_length, sizeof(uint32_t));
-    temp += sizeof(uint32_t);
     memcpy(temp, &actual_number_of_args, sizeof(uint32_t));
     temp += sizeof(uint32_t);
     for(int i = 3; i < argc; i++){
@@ -186,9 +187,12 @@ void send_command(int sock, int argc, char** argv){
     }
 
     // Write the message to the server
+    printf("jobCommander : Writing the message to the server\n");
+    printf("Socket for communication : %d\n", sock);
     if((m_write(sock, message, total_length)) == -1)
         print_error_and_die("jobCommander : Error writing the message to the server");
 
+    printf("jobCommander : Message sent to the server\n");
     free(message);
 }
 
@@ -203,7 +207,7 @@ void recieve_response(int sock, char* command){
     void* buffer = NULL;
 
     if((strcmp(command, "exit") == 0) || (strcmp(command, "stop") == 0) || (strcmp(command, "setConcurrency") == 0)){
-        if(m_read(sock, buffer) == -1)
+        if(m_read(sock, &buffer) == -1)
             print_error_and_die("jobCommander : Error reading the EXIT message from the server");
         
         // Get pass the length of the message
@@ -211,7 +215,7 @@ void recieve_response(int sock, char* command){
         printf("jobCommander : %s\n", response);
     }
     else if(strcmp(command, "poll") == 0){
-        if(m_read(sock, buffer) == -1)
+        if(m_read(sock, &buffer) == -1)
             print_error_and_die("jobCommander : Error reading the POLL message from the server");
         
         // Parse the buffer and print the results
@@ -259,8 +263,11 @@ void recieve_response(int sock, char* command){
         char* worker_response;
         int size_of_worker_response = 0;
         uint16_t both = 0;
+        uint16_t times_send = 0;
+        printf("jobCommander : Waiting for the response from the server\n");
         while(1){
-            if(m_read(sock, buffer) == -1)
+            printf("jobCommander : Reading the response from the server\n");
+            if(m_read(sock, &buffer) == -1)
                 print_error_and_die("jobCommander : Error reading the response from the server");
             
             // Get the length of the chunk
@@ -268,6 +275,8 @@ void recieve_response(int sock, char* command){
             void* buffer_ptr = buffer;
             memcpy(&length_of_chunk, buffer_ptr, sizeof(uint32_t));
             buffer_ptr += sizeof(uint32_t);
+            length_of_chunk -= sizeof(uint32_t);
+            printf("Length of chunk = %d\n", length_of_chunk);
 
             // Allocate memory for the chunk
             char* chunk = malloc(length_of_chunk + 1);
@@ -277,8 +286,16 @@ void recieve_response(int sock, char* command){
             // Copy the chunk to the buffer
             memcpy(chunk, buffer_ptr, length_of_chunk);
             chunk[length_of_chunk] = '\0';
+            // ! FOR SOME REASON IT PRINTS 4 EMPTY AND THEN 
+            // ! JOB <...> SUBMI . IT LOSES BYTES AT THE END
+            printf("Chunk : ");
+            for (uint32_t i = 0; i < length_of_chunk; i++) {
+                printf("%c\n", chunk[i]);
+            }
+            printf("\n");
 
             if(strncmp(chunk, "JOB <", 5) == 0){
+                printf("Controller thread response\n");
                 // Controller thread response
                 printf("%s\n", chunk);
                 both++;
@@ -289,6 +306,7 @@ void recieve_response(int sock, char* command){
             }
             else{
                 // Chunk from worker thread. Reallocate for worker_response
+                printf("Chunk from worker thread\n");
                 size_of_worker_response += length_of_chunk;
                 worker_response = realloc(worker_response, size_of_worker_response);
                 if(!worker_response)
@@ -297,8 +315,17 @@ void recieve_response(int sock, char* command){
                 strcat(worker_response, chunk);
             }
 
+            // Have to send it 2 times before having the final response
+            if((strncmp(chunk, "-----", 5) == 0) && (times_send == 0)){
+                times_send++;
+                free(chunk);
+                printf("Came first time\n");
+                continue;
+            }
+
             if(strncmp(chunk, "-----", 5) == 0){
                 // Worker thread response
+                printf("Came second time\n");
                 worker_response = realloc(worker_response, size_of_worker_response + 1);
                 if(!worker_response)
                     print_error_and_die("jobCommander : Error reallocating memory for worker_response");

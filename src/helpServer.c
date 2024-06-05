@@ -19,34 +19,39 @@ uint64_t find_digits(int num){
 /*
     Get the metadata information of the job and put it in the buffer.
 */
-void readCommand(int client_sock, void* buffer_start, void* buffer_ptr, uint32_t* length_of_message, uint32_t* number_of_args, size_t* length_of_command, char* command){
+void readCommand(int client_sock, void** buffer_start, void** buffer_ptr, uint32_t* length_of_message, uint32_t* number_of_args, size_t* length_of_command, char** command){
     if(m_read(client_sock, buffer_start) == -1)
         print_error_and_die("jobExecutorServer : Error reading message from client");
     
+    *buffer_ptr = *buffer_start;
+    if(*buffer_ptr == NULL)
+        print_error_and_die("jobExecutorServer : TEO");
+    
     // Get the info
-    memcpy(length_of_message, buffer_ptr, sizeof(uint32_t));
-    buffer_ptr += sizeof(uint32_t);
+    printf("Command read\n");
+    memcpy(length_of_message, *buffer_ptr, sizeof(uint32_t));
+    (*buffer_ptr) += sizeof(uint32_t);
 
-    memcpy(number_of_args, buffer_ptr, sizeof(uint32_t));
-    buffer_ptr += sizeof(uint32_t);
+    printf("length of message is %d\n", *length_of_message);
 
-    memcpy(length_of_command, buffer_ptr, sizeof(size_t));
-    buffer_ptr += sizeof(size_t);
+    memcpy(number_of_args, *buffer_ptr, sizeof(uint32_t));
+    *buffer_ptr += sizeof(uint32_t);
 
-    command = (char*)malloc(*length_of_command + 1);
-    if(!command)
+    memcpy(length_of_command, *buffer_ptr, sizeof(size_t));
+    *command = (char*)malloc(*length_of_command + 1);
+    if(!(*command))
         print_error_and_die("jobExecutorServer : Error allocating memory for command");
     
-    memcpy(command, buffer_ptr, *length_of_command);
-    command[*length_of_command] = '\0';
-    buffer_ptr += *length_of_command;
+    memcpy(*command, (*buffer_ptr) + sizeof(size_t), *length_of_command);
+    (*command)[*length_of_command] = '\0';
 }
 
 /*
     Construct the arguments array for the job.
 */
-void constructArgsArray(void* buffer, uint32_t number_of_args, char** arguments, char* command){
-    arguments = (char**)malloc((number_of_args + 1) * sizeof(char*));
+char** constructArgsArray(void* buffer, uint32_t number_of_args, char** command){
+    printf("Buffer points to address(construct) : %p\n", buffer);
+    char** arguments = (char**)malloc((number_of_args + 1) * sizeof(char*));
     if(!arguments)
         print_error_and_die("jobExecutorServer : Error allocating memory for arguments");
     
@@ -56,9 +61,10 @@ void constructArgsArray(void* buffer, uint32_t number_of_args, char** arguments,
         size_t length_of_arg;
         memcpy(&length_of_arg, buffer, sizeof(size_t));
         buffer += sizeof(size_t);
+        printf("Size of arg : %ld\n", length_of_arg);
 
         arguments[i] = (char*)malloc(length_of_arg + 1);
-        if(!arguments[i])
+        if(!(arguments[i]))
             print_error_and_die("jobExecutorServer : Error allocating memory for arguments[%d]", i);
         
         memcpy(arguments[i], buffer, length_of_arg);
@@ -72,11 +78,11 @@ void constructArgsArray(void* buffer, uint32_t number_of_args, char** arguments,
     arguments[number_of_args] = NULL;
 
     // Construct the whole command
-    command = (char*)malloc(length_of_whole_command);
-    if(!command)
+    *command = (char*)malloc(length_of_whole_command);
+    if(!(*command))
         print_error_and_die("jobExecutorServer : Error allocating memory for command");
     
-    char* temp = command;
+    char* temp = *command;
     for(uint32_t i = 0; i < number_of_args; i++){
         strncpy(temp, arguments[i], strlen(arguments[i]));
         temp += strlen(arguments[i]);
@@ -91,23 +97,28 @@ void constructArgsArray(void* buffer, uint32_t number_of_args, char** arguments,
         }
     }
 
+    return arguments;
 }
 
 /*
     Issue a job to the buffer and respond to the client.
 */
 void issueJob(void* buffer, int client_sock, uint32_t number_of_args){
+    printf("Buffer points to address(issue) : %p\n", buffer);
+    printf("Issuing job\n");
     // Create a new job for the List-Buffer
     Job job = (Job)malloc(sizeof(*job));
 
     // Job ID
     pthread_mutex_lock(&global_vars_mutex);
+    printf("Locked global_vars_mutex\n");
     uint64_t digits = find_digits(id);
     job->jobid = (char*)malloc(digits + 5);
     sprintf(job->jobid, "job_%d", id);
     job->jobid[digits + 4] = '\0';
 
     id++;
+    printf("Unlocking global_vars_mutex\n");
     pthread_mutex_unlock(&global_vars_mutex);
 
     // Number of arguments and file descriptor
@@ -115,19 +126,29 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args){
     job->fd = client_sock;
 
     // Arguments array and whole command
-    constructArgsArray(buffer, job->number_of_args, job->arguments, job->command);
+    printf("Constructing arguments array\n");
+    job->arguments = constructArgsArray(buffer, job->number_of_args, &(job->command));
+    printf("Arguments array constructed\n");
+    if(job->arguments == NULL)
+        print_error_and_die("jobExecutorServer : Error constructing arguments array");
+    
+    if(job->command == NULL)
+        print_error_and_die("jobExecutorServer : Error constructing command");
 
     // Append the job to the buffer. If the buffer is full, wait with condition variable
     pthread_mutex_lock(&buffer_mutex);
+    printf("Locked buffer_mutex\n");
     while(isFull(buffer_with_tasks))
         pthread_cond_wait(&buffer_not_full, &buffer_mutex);
     
     appendJob(buffer_with_tasks, job);
     pthread_cond_signal(&buffer_not_empty);
+    printf("Unlocking buffer_mutex\n");
     pthread_mutex_unlock(&buffer_mutex);
 
     // Send response : JOB <jobID, job> SUBMITTED
     uint32_t length_of_response = 18 + strlen(job->jobid) + strlen(job->command);
+    printf("Length of response : %d\n", length_of_response);
     void* response_start = malloc(length_of_response + sizeof(uint32_t));
     if(!response_start)
         print_error_and_die("jobExecutorServer : Error allocating memory for response");
@@ -144,10 +165,14 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args){
     sprintf(message, "JOB <%s, %s> SUBMITTED", job->jobid, job->command);
     message[length_of_response] = '\0';
     memcpy(response, message, length_of_response);
+    printf("Response message : %s\n", (char*)(response_start + sizeof(uint32_t)));
 
+    printf("Writing response to client\n");
+    printf("Client socket : %d\n", client_sock);
     if(m_write(client_sock, response_start, length_of_response + sizeof(uint32_t)) == -1)
         print_error_and_die("jobExecutorServer : Error writing response to client");
     
+    printf("Response written to client\n");
     free(message);
     free(response_start);
 }
@@ -173,6 +198,7 @@ void setConcurrency(void* buffer, int client_sock){
     concurrency = atoi(new_concurrency);
 
     // Signal the worker threads to check the new concurrency
+    // ! BROADCAST BETTER TO 
     int threads_to_signal = concurrency - old_concurrency;
     if(threads_to_signal > 0){
         pthread_mutex_lock(&buffer_mutex);
@@ -230,6 +256,7 @@ void stopJob(void* buffer, int client_sock){
     pthread_mutex_lock(&buffer_mutex);
     ListNode current = buffer_with_tasks->head;
     bool found = false;
+    // ! SIGNAL CONTROLLER THREAD WHEN REMOVED JOB NOT FULL 
     while(current != NULL){
         if(strcmp(current->job->jobid, jobid) == 0){
             removeJob(buffer_with_tasks, current->job->jobid);
@@ -452,7 +479,9 @@ void* controller_function(void* arg){
     free(arg);
 
     pthread_mutex_lock(&terminate_mutex);
+    printf("Locked terminate_mutex\n");
     active_controller_threads++;
+    printf("Active controller threads : %d\n", active_controller_threads);
     pthread_mutex_unlock(&terminate_mutex);
 
     void* buffer_start = NULL;
@@ -461,7 +490,13 @@ void* controller_function(void* arg){
     uint32_t number_of_args;
     size_t length_of_command;
     char* command = NULL;
-    readCommand(client_sock, buffer_start, buffer_ptr, &length_of_message, &number_of_args, &length_of_command, command);
+    printf("Reading command\n");
+    // ! FTIAKSE TOYS BUFFER LAKAMA !!!!
+    // ! PERNA DIEYTHYNSH STO BUFFER_PTR !!!!
+    // ! AN DEN KATALABAINEIS RWTA TON ALLON LAKAMA (TEO) !!!!
+    readCommand(client_sock, &buffer_start, &buffer_ptr, &length_of_message, &number_of_args, &length_of_command, &command);
+    printf("Command read\n");
+    printf("Buffer points to address(controller) : %p\n", buffer_start);
 
     // Handle each command differently
     if(strcmp(command, "issueJob") == 0){
@@ -480,17 +515,22 @@ void* controller_function(void* arg){
         exitServer(client_sock);
     }
 
+    printf("Controller thread finished\n");
     if(m_close(client_sock) == -1)
         print_error_and_die("jobExecutorServer : Error closing client socket");
     
+    printf("Client socket closed\n");
+
     free(command);
     free(buffer_start);
 
     pthread_mutex_lock(&terminate_mutex);
+    printf("Checking for termination\n");
     active_controller_threads--;
     if(terminate && active_controller_threads == 0)
         pthread_cond_signal(&terminate_cond);
     
+    printf("Termination checked\n");
     pthread_mutex_unlock(&terminate_mutex);
 
     return NULL;
@@ -511,27 +551,37 @@ void* worker_function(){
         }
         pthread_mutex_unlock(&terminate_mutex);
 
+        // ! add terminate condition here too because of those who wait
+        // ! Signal with broadcast in exit function to let them.  
         ListNode listjob = NULL;
         pthread_mutex_lock(&buffer_mutex);
-        while(isEmpty(buffer_with_tasks))
+        printf("Locked buffer_mutex\n");
+        while(isEmpty(buffer_with_tasks)){
             pthread_cond_wait(&buffer_not_empty, &buffer_mutex);
+            // ! if terminate    
+        }
+
 
         // Check if concurrency level let us handle the job
         // ! Using buffer_mutex here may be wrong !!!
         pthread_mutex_lock(&global_vars_mutex);
-        if(worker_threads_working >= concurrency)
+        printf("Locked global_vars_mutex\n");
+        while (worker_threads_working >= concurrency)
             pthread_cond_wait(&worker_cond, &buffer_mutex);
         
         worker_threads_working++;
+        printf("Worker threads working : %d\n", worker_threads_working);
         pthread_mutex_unlock(&global_vars_mutex);
         listjob = dequeueJob(buffer_with_tasks);
         pthread_cond_signal(&buffer_not_full);
         
+        printf("Unlocked buffer_mutex\n");
         pthread_mutex_unlock(&buffer_mutex);
 
         // Handle job
+        printf("Handling job\n");
         pid_t pid = fork();
-        if(pid == 0){\
+        if(pid == 0){
             // Create file for output
             // filename will be a cause of leaks, let OS handle it
             pid_t child_pid = getpid();
@@ -547,7 +597,7 @@ void* worker_function(){
             close(fd);
 
             // Execute the job
-            execvp(listjob->job->arguments[0], listjob->job->arguments);
+            execvp(listjob->job->arguments[1], (listjob->job->arguments + 1));
             print_error_and_die("jobExecutorServer : Error executing job");
         }
         else if(pid > 0){
@@ -639,7 +689,7 @@ bool validate_arguments(int argc, char** argv){
 
     // Check for valid numbers
     if(port < 0 || port > 65535 || buffersize < 1 || threadPoolSize < 1)
-        return false;
+        return false;   
 
     return true;
 }
@@ -663,7 +713,7 @@ void create_connection(int* sock_server, uint16_t port){
     
     if(listen(*sock_server, MAX_CONNECTIONS) < 0)
         print_error_and_die("jobExecutorServer : Error listening for connections");
-
+    
 }
 
 /*
