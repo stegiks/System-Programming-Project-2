@@ -18,7 +18,7 @@ void readCommand(int client_sock, void** buffer_start, void** buffer_ptr, uint32
     memcpy(length_of_message, *buffer_ptr, sizeof(uint32_t));
     (*buffer_ptr) += sizeof(uint32_t);
 
-    printf("Controller : length of message is %d\n", *length_of_message);
+    printf("Controller %ld : length of message is %d\n", pthread_self(), *length_of_message);
 
     memcpy(number_of_args, *buffer_ptr, sizeof(uint32_t));
     *buffer_ptr += sizeof(uint32_t);
@@ -94,14 +94,14 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
 
     // Job ID
     pthread_mutex_lock(&global_vars_mutex);
-    printf("Controller : Locked global_vars_mutex\n");
+    printf("Controller %ld: Locked global_vars_mutex\n", pthread_self());
     uint64_t digits = find_digits(id);
     job->jobid = (char*)malloc(digits + 5);
     sprintf(job->jobid, "job_%d", id);
     job->jobid[digits + 4] = '\0';
 
     id++;
-    printf("Controller : Unlocking global_vars_mutex\n");
+    printf("Controller %ld: Unlocking global_vars_mutex\n", pthread_self());
     pthread_mutex_unlock(&global_vars_mutex);
 
     // Number of arguments and file descriptor
@@ -116,18 +116,18 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
 
     // Append the job to the buffer. If the buffer is full, wait with condition variable
     pthread_mutex_lock(&buffer_mutex);
-    printf("Controller : Locked buffer_mutex\n");
+    printf("Controller %ld : Locked buffer_mutex\n", pthread_self());
     while(isFull(buffer_with_tasks))
         pthread_cond_wait(&buffer_not_full, &buffer_mutex);
     
     appendJob(buffer_with_tasks, job);
     pthread_cond_signal(&buffer_not_empty);
-    printf("Controller : Unlocking buffer_mutex\n");
+    printf("Controller %ld : Unlocking buffer_mutex\n", pthread_self());
     pthread_mutex_unlock(&buffer_mutex);
 
     // Send response : JOB <jobID, job> SUBMITTED
     uint32_t length_of_response = 18 + strlen(job->jobid) + strlen(job->command);
-    printf("Controller : Length of response : %d\n", length_of_response);
+    printf("Controller %ld : Length of response : %d\n", pthread_self(), length_of_response);
 
     // Construct the message
     char* message = malloc(length_of_response + 1);
@@ -165,7 +165,7 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
 
         ssize_t n;
         uint32_t total_size = size_to_write + sizeof(int) + sizeof(uint32_t);
-        printf("Controller : Total size is %d\n", total_size);
+        printf("Controller %ld : Total size is %d\n", pthread_self(), total_size);
         if((n = m_write(client_sock, response, total_size)) == -1)
             print_error_and_die("jobExecutorServer : Error writing response to client");
         
@@ -175,7 +175,7 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
         free(response);
     }
     
-    printf("Controller : Response written to client\n");
+    printf("Controller %ld : Response written to client\n", pthread_self());
     free(message);
 }
 
@@ -273,7 +273,7 @@ void stopJob(void* buffer, int client_sock){
             memcpy(removed_response + sizeof(int), message, 44);
 
             uint32_t total_size = 44 + sizeof(int) + sizeof(uint32_t);
-            printf("Controller : Total size is %d\n", total_size);
+            printf("Controller %ld : Total size is %d\n", pthread_self(), total_size);
             if(m_write(current->job->fd, removed_response, total_size) == -1)
                 print_error_and_die("jobExecutorServer : Error writing response to client");
 
@@ -499,9 +499,9 @@ void* controller_function(void* arg){
     free(arg);
 
     pthread_mutex_lock(&terminate_mutex);
-    printf("Controller : Locked terminate_mutex\n");
+    printf("Controller %ld : Locked terminate_mutex\n", pthread_self());
     active_controller_threads++;
-    printf("Controller : Active controller threads : %d\n", active_controller_threads);
+    printf("Controller %ld : Active controller threads : %d\n", pthread_self(), active_controller_threads);
     pthread_mutex_unlock(&terminate_mutex);
 
     void* buffer_start = NULL;
@@ -510,9 +510,9 @@ void* controller_function(void* arg){
     uint32_t number_of_args;
     size_t length_of_command;
     char* command = NULL;
-    printf("Controller : Reading command\n");
+    printf("Controller %ld : Reading command\n", pthread_self());
     readCommand(client_sock, &buffer_start, &buffer_ptr, &length_of_message, &number_of_args, &length_of_command, &command);
-    printf("Controller : Command read\n");
+    printf("Controller %ld : Command read\n", pthread_self());
 
     // Handle each command differently
     ThreadData thread_data = NULL;
@@ -546,15 +546,15 @@ void* controller_function(void* arg){
 
     // Check if the worker has finished writing 
     // the response to close the socket and free the memory
-    printf("Controller : Controller thread finished\n");
+    printf("Controller %ld : Controller thread finished\n", pthread_self());
     if(thread_data != NULL){
-        printf("Controller : Waiting for worker to finish\n");
+        printf("Controller %ld : Waiting for worker to finish\n", pthread_self());
         pthread_mutex_lock(&(thread_data->mutex));
         while(!(thread_data->worker_response_ready))
             pthread_cond_wait(&(thread_data->cond), &(thread_data->mutex));
         
         pthread_mutex_unlock(&(thread_data->mutex));
-        printf("Controller : Freeing thread_data controller\n");
+        printf("Controller %ld : Freeing thread_data controller\n", pthread_self());
         free(thread_data);
     }
 
@@ -562,18 +562,18 @@ void* controller_function(void* arg){
     if(m_close(client_sock) == -1)
         print_error_and_die("jobExecutorServer : Error closing client socket");
     
-    printf("Controller : Client socket closed\n");
+    printf("Controller %ld : Client socket closed\n", pthread_self());
 
     free(command);
     free(buffer_start);
 
     pthread_mutex_lock(&terminate_mutex);
-    printf("Controller : Checking for termination\n");
+    printf("Controller %ld : Checking for termination\n", pthread_self());
     active_controller_threads--;
     if(terminate && active_controller_threads == 0)
         pthread_cond_signal(&terminate_cond);
     
-    printf("Controller : Termination checked\n");
+    printf("Controller %ld : Termination checked\n", pthread_self());
     pthread_mutex_unlock(&terminate_mutex);
 
     return NULL;
@@ -596,7 +596,7 @@ void* worker_function(){
 
         ListNode listjob = NULL;
         pthread_mutex_lock(&buffer_mutex);
-        printf("Worker : Locked buffer_mutex worker\n");
+        printf("Worker %ld : Locked buffer_mutex worker\n", pthread_self());
         while(isEmpty(buffer_with_tasks)){
             pthread_cond_wait(&buffer_not_empty, &buffer_mutex);
             
@@ -613,24 +613,27 @@ void* worker_function(){
 
         // Check if concurrency level let us handle the job
         pthread_mutex_lock(&global_vars_mutex);
-        printf("Worker : Locked global_vars_mutex worker\n");
+        printf("Worker %ld : Locked global_vars_mutex worker\n", pthread_self());
         while (worker_threads_working >= concurrency){
+            printf("Worker %ld : Worker waiting because of concurrency\n", pthread_self());
             pthread_mutex_unlock(&buffer_mutex);
             pthread_cond_wait(&worker_cond, &global_vars_mutex);
             pthread_mutex_lock(&buffer_mutex);
         }
         
         worker_threads_working++;
-        printf("Worker : Worker threads working : %d\n", worker_threads_working);
+        printf("Worker %ld : Worker threads working : %d\n", pthread_self(), worker_threads_working);
         pthread_mutex_unlock(&global_vars_mutex);
         listjob = dequeueJob(buffer_with_tasks);
         if(listjob == NULL){
+            printf("Worker %ld : Listjob is NULL\n", pthread_self());
+            worker_threads_working--;
             pthread_mutex_unlock(&buffer_mutex);
             continue;
         }
         pthread_cond_signal(&buffer_not_full);
         
-        printf("Worker : Unlocked buffer_mutex worker\n");
+        printf("Worker %ld : Unlocked buffer_mutex worker\n", pthread_self());
         pthread_mutex_unlock(&buffer_mutex);
 
         // Handle job
@@ -686,7 +689,7 @@ void* worker_function(){
             memcpy(start_message_with_type + sizeof(int), start_message, 24 + len_of_jobid);
 
             uint32_t total_size = 24 + len_of_jobid + sizeof(int) + sizeof(uint32_t);
-            printf("Worker : Total size is %d\n", total_size);
+            printf("Worker %ld : Total size is %d\n", pthread_self(), total_size);
             if(m_write(listjob->job->fd, start_message_with_type, total_size) == -1)
                 print_error_and_die("jobExecutorServer : Error writing response to client");
             
@@ -711,7 +714,7 @@ void* worker_function(){
 
                 // Write the chunk
                 uint32_t total_size = n + sizeof(int) + sizeof(uint32_t);
-                printf("Worker : Total size is %d\n", total_size);
+                printf("Worker %ld : Total size is %d\n", pthread_self(), total_size);
                 if(m_write(listjob->job->fd, buffer, total_size) == -1)
                     print_error_and_die("jobExecutorServer : Error writing output chunk to client");
                 
@@ -737,7 +740,7 @@ void* worker_function(){
             memcpy(end_message_with_type + sizeof(int), end_message, 22 + len_of_jobid);
 
             total_size = 22 + len_of_jobid + sizeof(int) + sizeof(uint32_t);
-            printf("Worker : Total size is %d\n", total_size);
+            printf("Worker %ld : Total size is %d\n", pthread_self(), total_size);
             if(m_write(listjob->job->fd, end_message_with_type, total_size) == -1)
                 print_error_and_die("jobExecutorServer : Error writing response to client");
             
@@ -745,7 +748,7 @@ void* worker_function(){
             free(end_message_with_type);
             //! End of end message
 
-            printf("Worker : Output sent\n");
+            printf("Worker %ld : Output sent\n", pthread_self());
 
             // Signal the controller thread that the response is ready
             // so that it can close the socket
@@ -758,11 +761,11 @@ void* worker_function(){
             remove(filename);
             free(filename);
             // In the end!
-            printf("Worker : Locking global_vars_mutex\n");
+            printf("Worker %ld : Locking global_vars_mutex\n", pthread_self());
             pthread_mutex_lock(&global_vars_mutex);
-            printf("Worker : Locked global_vars_mutex\n");
+            printf("Worker %ld : Locked global_vars_mutex\n", pthread_self());
             worker_threads_working--;
-            printf("Worker : Unlocked global_vars_mutex\n");
+            printf("Worker %ld : Unlocked global_vars_mutex\n", pthread_self());
             pthread_mutex_unlock(&global_vars_mutex);
             pthread_cond_signal(&worker_cond);
         }
