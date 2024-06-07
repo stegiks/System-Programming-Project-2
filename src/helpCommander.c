@@ -196,6 +196,22 @@ void send_command(int sock, int argc, char** argv){
     free(message);
 }
 
+
+void print_file(char* file){
+    FILE* f = fopen(file, "r");
+    if(!f)
+        print_error_and_die("jobCommander : Error opening the file %s", file);
+    
+    char c;
+    while((c = fgetc(f)) != EOF)
+        printf("%c", c);
+    
+    printf("\n");
+    
+    fclose(f);
+}
+
+
 /*
     This function reads the response from the server.
     The client is responsible to get message response
@@ -259,107 +275,98 @@ void recieve_response(int sock, char* command){
 
     }
     else{
-        // Format will be : [length of chunk] [chunk] ...
-        char* worker_response;
-        int size_of_worker_response = 0;
-        uint16_t both = 0;
-        uint16_t times_send = 0;
-        printf("jobCommander : Waiting for the response from the server\n");
-        while(1){
-            // ! Blepe auto !!!
-            // ! Gia ta epomena reads 
-            if(buffer!=NULL){
-                free(buffer);
-                printf("O Stefo ksexase na kanei free\n");
-            }
-            printf("jobCommander : Reading the response from the server\n");
+        pid_t pid = getpid();
+        uint64_t digits = find_digits(pid);
+        char* pid_string = malloc(digits + 1);
+        if(!pid_string)
+            print_error_and_die("jobCommander : Error allocating memory for pid_string");
+        
+        sprintf(pid_string, "%d", pid);
+
+        char* file_response = malloc(strlen("/tmp/res_") + strlen(pid_string) + strlen(".txt") + 1);
+        if(!file_response)
+            print_error_and_die("jobCommander : Error allocating memory for file_response");
+        
+        sprintf(file_response, "/tmp/res_%s.txt", pid_string);
+
+        char* file_output = malloc(strlen("/tmp/out_") + strlen(pid_string) + strlen(".txt") + 1);
+        if(!file_output)
+            print_error_and_die("jobCommander : Error allocating memory for file_output");
+        
+        sprintf(file_output, "/tmp/out_%s.txt", pid_string);
+
+        FILE* file_res = fopen(file_response, "a+");
+        if(!file_res)
+            print_error_and_die("jobCommander : Error opening the file %s", file_response);
+        
+        FILE* file_out = fopen(file_output, "a+");
+        if(!file_out)
+            print_error_and_die("jobCommander : Error opening the file %s", file_output);
+        
+        bool output_done = false, res_done = false;
+
+        while(!(output_done) || !(res_done)){
             if(m_read(sock, &buffer) == -1)
                 print_error_and_die("jobCommander : Error reading the response from the server");
             
-            // Get the length of the chunk
-            uint32_t length_of_chunk;
-            char * teo_buffer = (char *) (buffer+sizeof(uint32_t));
-            printf("\nTEO DEBUG: \n%s\n", teo_buffer);
-            void* buffer_ptr = buffer;
-            printf("Buffer points to %p", buffer_ptr);
-            memcpy(&length_of_chunk, buffer_ptr, sizeof(uint32_t));
-            buffer_ptr += sizeof(uint32_t);
-            printf("Buffer points to %p", buffer_ptr);
-            length_of_chunk -= sizeof(uint32_t);
-            printf("Length of chunk = %d\n", length_of_chunk);
+            // Get the length of the message
+            uint32_t length_of_message;
+            memcpy(&length_of_message, buffer, sizeof(uint32_t));
 
-            // Allocate memory for the chunk
-            char* chunk = malloc(length_of_chunk + 1);
-            if(!chunk)
-                print_error_and_die("jobCommander : Error allocating memory for chunk");
-            
-            // Copy the chunk to the buffer
-            memcpy(chunk, buffer_ptr, length_of_chunk);
-            chunk[length_of_chunk] = '\0';
-            // ! FOR SOME REASON IT PRINTS 4 EMPTY AND THEN 
-            // ! JOB <...> SUBMI . IT LOSES BYTES AT THE END
-            printf("Chunk : ");
-            for (uint32_t i = 0; i < length_of_chunk; i++) {
-                printf("%c\n", chunk[i]);
-            }
-            printf("\n");
+            // Get type of message
+            int type;
+            memcpy(&type, buffer + sizeof(uint32_t), sizeof(int));
 
-            if(strncmp(chunk, "JOB <", 5) == 0){
-                printf("Controller thread response\n");
-                // Controller thread response
-                printf("%s\n", chunk);
-                both++;
-                if(both == 2){
-                    free(chunk);
-                    break;
-                }
+            // Get the message
+            char* message = (char*)(buffer + sizeof(uint32_t) + sizeof(int));
+
+            // Check type to handle
+            if(type == 1){
+                // Response chunk
+                if(write(fileno(file_res), message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                    print_error_and_die("jobCommander : Error writing to the file %s", file_response);
             }
-            else{
-                // Chunk from worker thread. Reallocate for worker_response
-                printf("Chunk from worker thread\n");
-                size_of_worker_response += length_of_chunk;
-                worker_response = realloc(worker_response, size_of_worker_response);
-                if(!worker_response)
-                    print_error_and_die("jobCommander : Error reallocating memory for worker_response");
+            else if(type == 2){
+                // Output chunk
+                if(write(fileno(file_out), message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                    print_error_and_die("jobCommander : Error writing to the file %s", file_output);
+            }
+            else if(type == -1){
+                // End of response
+                if(write(fileno(file_res), message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                    print_error_and_die("jobCommander : Error writing to the file %s", file_response);
                 
-                strcat(worker_response, chunk);
+                res_done = true;
+                print_file(file_response);
             }
-
-            // Have to send it 2 times before having the final response
-            if((strncmp(chunk, "-----", 5) == 0) && (times_send == 0)){
-                times_send++;
-                free(chunk);
-                printf("Came first time\n");
-                continue;
-            }
-
-            if(strncmp(chunk, "-----", 5) == 0){
-                // Worker thread response
-                printf("Came second time\n");
-                worker_response = realloc(worker_response, size_of_worker_response + 1);
-                if(!worker_response)
-                    print_error_and_die("jobCommander : Error reallocating memory for worker_response");
+            else if(type == -2){
+                // End of output
+                if(write(fileno(file_out), message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                    print_error_and_die("jobCommander : Error writing to the file %s", file_output);
                 
-                worker_response[size_of_worker_response] = '\0';
-                printf("%s\n", worker_response);
-                free(worker_response);
-
-                both++;
-                if(both == 2){
-                    free(chunk);
-                    break;
-                }
+                output_done = true;
+                print_file(file_output);
             }
 
-            free(chunk);
-            // ! MALLON FINITO !
+            // Memset to 0 before freeing
+            memset(buffer, 0, length_of_message);
+            if(!(output_done) || !(res_done))
+                free(buffer);
+
         }
 
+        fclose(file_res);
+        fclose(file_out);
+        remove(file_response);
+        remove(file_output);
+        free(file_response);
+        free(file_output);
+        free(pid_string);
     }
-
     // If allocation wasn't successful then the 
     // program will have already exited
-    free(buffer);
+    if(buffer)
+        free(buffer);
 
     if(m_close(sock) == -1)
         print_error_and_die("jobCommander : Error closing the socket");

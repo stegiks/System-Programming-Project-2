@@ -24,9 +24,12 @@ COMMANDER_OBJ_FILES := $(filter-out $(BUILD)/jobExecutorServer.o $(BUILD)/helpSe
 SERVER_OBJ_FILES := $(filter-out $(BUILD)/jobCommander.o $(BUILD)/helpCommander.o, $(OBJ_FILES))
 
 # Compilation
-all: $(BIN)/jobCommander $(BIN)/jobExecutorServer
+all: $(BIN)/jobCommander $(BIN)/jobExecutorServer $(BIN)/progDelay
 
 $(BUILD)/%.o: $(SRC)/%.c
+	$(CC) -c $< -o $@ $(CFLAGS)
+
+$(BUILD)/progDelay.o: progDelay.c
 	$(CC) -c $< -o $@ $(CFLAGS)
 
 # Linking
@@ -34,6 +37,9 @@ $(BIN)/jobCommander: $(COMMANDER_OBJ_FILES)
 	$(CC) $^ -o $@  $(CFLAGS)
 
 $(BIN)/jobExecutorServer: $(SERVER_OBJ_FILES) 
+	$(CC) $^ -o $@ $(CFLAGS)
+
+$(BIN)/progDelay: $(BUILD)/progDelay.o
 	$(CC) $^ -o $@ $(CFLAGS)
 
 run_commander: $(BIN)/jobCommander

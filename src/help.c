@@ -1,6 +1,19 @@
 #include "../include/help.h"
 
 /*
+    This function finds the number of digits in a number
+*/
+uint64_t find_digits(int num){
+    uint64_t digits = 0;
+    do {
+        num /= 10;
+        ++digits;
+    } while (num != 0);
+
+    return digits;
+}
+
+/*
     This functions checks if a string is a number.
 */
 bool isNumber(const char *str){
@@ -36,14 +49,17 @@ void print_error_and_die(const char* msg, ...){
 */
 ssize_t m_write(int fd, const void* buffer, uint32_t total_length){
     uint32_t bytes_written = 0;
-    uint32_t bytes_left = total_length;
+    uint32_t bytes_left = total_length - sizeof(uint32_t);
     ssize_t n;
 
     if(write(fd, &total_length, sizeof(uint32_t)) == -1)
         return -1;
 
+    // printf("m_write: Just wrote the total length of %d\n", total_length);
+
     while(bytes_written < total_length){
         n = write(fd, buffer + bytes_written, bytes_left);
+        // printf("m_write: Wrote another %ld bytes\n", n);
         if(n == -1){
             if(errno == EINTR){
                 // write interrupted by signal, retry
@@ -79,7 +95,7 @@ ssize_t m_read(int fd, void** buffer){
         if(errno != EINTR)
             return -1;
     
-    printf("m_read : Total length is = %d\n", total_length);
+    // printf("m_read : Total length is = %d\n", total_length);
 
     // Allocate memory for the message
     *buffer = malloc(total_length);
@@ -94,7 +110,7 @@ ssize_t m_read(int fd, void** buffer){
     uint32_t bytes_left = total_length - sizeof(uint32_t);
     while(bytes_read < total_length){
         n = read(fd, (*buffer) + bytes_read, bytes_left);
-        printf("m_read : Read another %ld bytes\n", n);
+        // printf("m_read : Read another %ld bytes\n", n);
         if(n == -1){
             if(errno == EINTR){
                 // read interrupted by signal, retry
@@ -112,9 +128,6 @@ ssize_t m_read(int fd, void** buffer){
         bytes_left -= n;
     }
 
-    printf("Read result of total length: %d\n",*((int *)(*buffer)));
-    printf("Read result:\n%s\n",(char *)((*buffer+4)));
-    printf("returning\n");
     return bytes_read;
 }
 
