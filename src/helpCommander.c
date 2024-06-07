@@ -266,15 +266,25 @@ void recieve_response(int sock, char* command){
         uint16_t times_send = 0;
         printf("jobCommander : Waiting for the response from the server\n");
         while(1){
+            // ! Blepe auto !!!
+            // ! Gia ta epomena reads 
+            if(buffer!=NULL){
+                free(buffer);
+                printf("O Stefo ksexase na kanei free\n");
+            }
             printf("jobCommander : Reading the response from the server\n");
             if(m_read(sock, &buffer) == -1)
                 print_error_and_die("jobCommander : Error reading the response from the server");
             
             // Get the length of the chunk
             uint32_t length_of_chunk;
+            char * teo_buffer = (char *) (buffer+sizeof(uint32_t));
+            printf("\nTEO DEBUG: \n%s\n", teo_buffer);
             void* buffer_ptr = buffer;
+            printf("Buffer points to %p", buffer_ptr);
             memcpy(&length_of_chunk, buffer_ptr, sizeof(uint32_t));
             buffer_ptr += sizeof(uint32_t);
+            printf("Buffer points to %p", buffer_ptr);
             length_of_chunk -= sizeof(uint32_t);
             printf("Length of chunk = %d\n", length_of_chunk);
 

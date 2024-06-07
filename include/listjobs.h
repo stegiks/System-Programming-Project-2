@@ -3,9 +3,16 @@
 
 #include "help.h"
 
+typedef struct thread_data* ThreadData;
 typedef struct job* Job;
 typedef struct list_node* ListNode;
 typedef struct list* List;
+
+struct thread_data{
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    bool worker_response_ready;
+};
 
 struct job{
     int fd;
@@ -13,6 +20,7 @@ struct job{
     char* command;
     char** arguments;
     uint32_t number_of_args;
+    ThreadData thread_data;
 };
 
 struct list_node{

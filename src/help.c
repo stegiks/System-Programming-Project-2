@@ -112,6 +112,8 @@ ssize_t m_read(int fd, void** buffer){
         bytes_left -= n;
     }
 
+    printf("Read result of total length: %d\n",*((int *)(*buffer)));
+    printf("Read result:\n%s\n",(char *)((*buffer+4)));
     printf("returning\n");
     return bytes_read;
 }

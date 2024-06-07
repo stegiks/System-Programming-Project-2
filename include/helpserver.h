@@ -3,6 +3,7 @@
 
 #include "listjobs.h"
 #define MAX_CONNECTIONS 100
+#define CHUNKSIZE 1024
 
 extern bool terminate;
 extern int active_controller_threads; 

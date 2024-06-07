@@ -103,9 +103,7 @@ char** constructArgsArray(void* buffer, uint32_t number_of_args, char** command)
 /*
     Issue a job to the buffer and respond to the client.
 */
-void issueJob(void* buffer, int client_sock, uint32_t number_of_args){
-    printf("Buffer points to address(issue) : %p\n", buffer);
-    printf("Issuing job\n");
+void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData m_thread_data){
     // Create a new job for the List-Buffer
     Job job = (Job)malloc(sizeof(*job));
 
@@ -125,15 +123,13 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args){
     job->number_of_args = number_of_args;
     job->fd = client_sock;
 
+    // Thread data. Make it point to the same address as the argument
+    job->thread_data = m_thread_data;
+
     // Arguments array and whole command
     printf("Constructing arguments array\n");
     job->arguments = constructArgsArray(buffer, job->number_of_args, &(job->command));
     printf("Arguments array constructed\n");
-    if(job->arguments == NULL)
-        print_error_and_die("jobExecutorServer : Error constructing arguments array");
-    
-    if(job->command == NULL)
-        print_error_and_die("jobExecutorServer : Error constructing command");
 
     // Append the job to the buffer. If the buffer is full, wait with condition variable
     pthread_mutex_lock(&buffer_mutex);
@@ -149,13 +145,6 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args){
     // Send response : JOB <jobID, job> SUBMITTED
     uint32_t length_of_response = 18 + strlen(job->jobid) + strlen(job->command);
     printf("Length of response : %d\n", length_of_response);
-    void* response_start = malloc(length_of_response + sizeof(uint32_t));
-    if(!response_start)
-        print_error_and_die("jobExecutorServer : Error allocating memory for response");
-
-    void* response = response_start;
-    memcpy(response, &length_of_response, sizeof(uint32_t));
-    response += sizeof(uint32_t);
 
     // Construct the message
     char* message = malloc(length_of_response + 1);
@@ -164,17 +153,46 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args){
 
     sprintf(message, "JOB <%s, %s> SUBMITTED", job->jobid, job->command);
     message[length_of_response] = '\0';
-    memcpy(response, message, length_of_response);
-    printf("Response message : %s\n", (char*)(response_start + sizeof(uint32_t)));
 
-    printf("Writing response to client\n");
-    printf("Client socket : %d\n", client_sock);
-    if(m_write(client_sock, response_start, length_of_response + sizeof(uint32_t)) == -1)
-        print_error_and_die("jobExecutorServer : Error writing response to client");
+    // We need to write the response in chunks just like in the worker function
+    // Write an integer at the start to indicate that it is a response
+    // 1 for response, 2 for output, -1 for end of response, -2 for end of output
+    uint32_t bytes_written = 0;
+    uint32_t bytes_left = length_of_response;
+    while(bytes_written < length_of_response){
+        uint32_t size_to_write;
+        int type;
+
+        // Set the size to write and the type of chunk
+        if(bytes_left > CHUNKSIZE){
+            size_to_write = CHUNKSIZE;
+            type = 1;
+        }
+        else{
+            size_to_write = bytes_left;
+            type = -1;
+        }
+
+        void* response = malloc(size_to_write + sizeof(int));
+        if(!response)
+            print_error_and_die("jobExecutorServer : Error allocating memory for response");
+        
+        memcpy(response, &type, sizeof(int));
+        memcpy(response + sizeof(int), message + bytes_written, size_to_write);
+
+        ssize_t n;
+        uint32_t total_size = size_to_write + sizeof(int) + sizeof(uint32_t);
+        if((n = m_write(client_sock, response, total_size)) == -1)
+            print_error_and_die("jobExecutorServer : Error writing response to client");
+        
+        bytes_written += size_to_write;
+        bytes_left -= size_to_write;
+
+        free(response);
+    }
     
     printf("Response written to client\n");
     free(message);
-    free(response_start);
 }
 
 
@@ -491,16 +509,25 @@ void* controller_function(void* arg){
     size_t length_of_command;
     char* command = NULL;
     printf("Reading command\n");
-    // ! FTIAKSE TOYS BUFFER LAKAMA !!!!
-    // ! PERNA DIEYTHYNSH STO BUFFER_PTR !!!!
-    // ! AN DEN KATALABAINEIS RWTA TON ALLON LAKAMA (TEO) !!!!
     readCommand(client_sock, &buffer_start, &buffer_ptr, &length_of_message, &number_of_args, &length_of_command, &command);
     printf("Command read\n");
-    printf("Buffer points to address(controller) : %p\n", buffer_start);
 
     // Handle each command differently
+    ThreadData thread_data = NULL;
     if(strcmp(command, "issueJob") == 0){
-        issueJob(buffer_ptr, client_sock, number_of_args);
+        thread_data = (ThreadData)malloc(sizeof(*thread_data));
+        if(!thread_data)
+            print_error_and_die("jobExecutorServer : Error allocating memory for thread_data");
+         
+        thread_data->worker_response_ready = false;
+
+        if(pthread_mutex_init(&(thread_data->mutex), NULL) != 0)
+            print_error_and_die("jobExecutorServer : Error initializing mutex");
+        
+        if(pthread_cond_init(&(thread_data->cond), NULL) != 0)
+            print_error_and_die("jobExecutorServer : Error initializing condition variable");
+        
+        issueJob(buffer_ptr, client_sock, number_of_args, thread_data);
     }
     else if(strcmp(command, "setConcurrency") == 0){
         setConcurrency(buffer_ptr, client_sock);
@@ -515,7 +542,20 @@ void* controller_function(void* arg){
         exitServer(client_sock);
     }
 
+    // Check if the worker has finished writing 
+    // the response to close the socket and free the memory
     printf("Controller thread finished\n");
+    if(thread_data != NULL){
+        printf("Waiting for worker to finish\n");
+        pthread_mutex_lock(&(thread_data->mutex));
+        while(!(thread_data->worker_response_ready))
+            pthread_cond_wait(&(thread_data->cond), &(thread_data->mutex));
+        
+        pthread_mutex_unlock(&(thread_data->mutex));
+        free(thread_data);
+    }
+
+    // Free the memory and close the socket
     if(m_close(client_sock) == -1)
         print_error_and_die("jobExecutorServer : Error closing client socket");
     
@@ -613,47 +653,88 @@ void* worker_function(){
             if(!file)
                 print_error_and_die("jobExecutorServer : Error opening file %s", filename);
 
-            // Write start message
+            //! Write start message
             size_t len_of_jobid = strlen(listjob->job->jobid);
             char* start_message = (char*)malloc(25 + len_of_jobid); 
+            if(!start_message)
+                print_error_and_die("jobExecutorServer : Error allocating memory for start message");
+            
             sprintf(start_message, "-----%s output start-----\n", listjob->job->jobid);
             start_message[24 + len_of_jobid] = '\0';
-            if(m_write(listjob->job->fd, start_message, 24 + len_of_jobid) == -1)
+
+            // Select type of message
+            int type = 2;
+            void* start_message_with_type = malloc(25 + len_of_jobid + sizeof(int));
+            if(!start_message_with_type)
+                print_error_and_die("jobExecutorServer : Error allocating memory for start message with type response");
+
+            memcpy(start_message_with_type, &type, sizeof(int));
+            memcpy(start_message_with_type + sizeof(int), start_message, 24 + len_of_jobid);
+
+            uint32_t total_size = 24 + len_of_jobid + sizeof(int) + sizeof(uint32_t);
+            if(m_write(listjob->job->fd, start_message_with_type, total_size) == -1)
                 print_error_and_die("jobExecutorServer : Error writing response to client");
             
             free(start_message);
+            free(start_message_with_type);
+            //! End of start message
 
-            // Send response in chunks
-            char buffer[4096];
-            ssize_t bytes_read;
-            while((bytes_read = fread(buffer, 1, 4096 - sizeof(uint32_t), file))){
-                uint32_t length_of_message = htonl(bytes_read);
-                void* response_start = malloc(bytes_read + sizeof(uint32_t));
-                if(!response_start)
-                    print_error_and_die("jobExecutorServer : Error allocating memory for response");
+            //! Send response in chunks
+            while(true){
+                void* buffer = malloc(CHUNKSIZE + sizeof(int));
+                if(!buffer)
+                    print_error_and_die("jobExecutorServer : Error allocating memory for buffer");
                 
-                void* response = response_start;
-                memcpy(response, &length_of_message, sizeof(uint32_t));
-                response += sizeof(uint32_t);
+                int type = 2;
+                memcpy(buffer, &type, sizeof(int));
 
-                memcpy(response, buffer, bytes_read);
+                ssize_t n = fread(buffer + sizeof(int), 1, CHUNKSIZE, file);
+                if(n <= 0){
+                    free(buffer);
+                    break;
+                }
 
-                if(m_write(listjob->job->fd, response_start, bytes_read + sizeof(uint32_t)) == -1)
-                    print_error_and_die("jobExecutorServer : Error writing response to client");
+                // Write the chunk
+                uint32_t total_size = n + sizeof(int) + sizeof(uint32_t);
+                if(m_write(listjob->job->fd, buffer, total_size) == -1)
+                    print_error_and_die("jobExecutorServer : Error writing output chunk to client");
                 
-                free(response_start);
-
+                free(buffer);
             }
+            //! End of response
 
-            // Write end message
+            //! Write end message
             char* end_message = (char*)malloc(23 + len_of_jobid);
+            if(!end_message)
+                print_error_and_die("jobExecutorServer : Error allocating memory for end message");
+
             sprintf(end_message, "-----%s output end-----\n", listjob->job->jobid);
             end_message[22 + len_of_jobid] = '\0';
-            if(m_write(listjob->job->fd, end_message, 22 + len_of_jobid) == -1)
+
+            type = -2;
+            void* end_message_with_type = malloc(23 + len_of_jobid + sizeof(int));
+            if(!end_message_with_type)
+                print_error_and_die("jobExecutorServer : Error allocating memory for end message with type response");
+            
+            memcpy(end_message_with_type, &type, sizeof(int));
+            memcpy(end_message_with_type + sizeof(int), end_message, 22 + len_of_jobid);
+
+            total_size = 22 + len_of_jobid + sizeof(int) + sizeof(uint32_t);
+            if(m_write(listjob->job->fd, end_message_with_type, total_size) == -1)
                 print_error_and_die("jobExecutorServer : Error writing response to client");
             
             free(end_message);
+            free(end_message_with_type);
+            //! End of end message
 
+            // Signal the controller thread that the response is ready
+            // so that it can close the socket
+            pthread_mutex_lock(&(listjob->job->thread_data->mutex));
+            listjob->job->thread_data->worker_response_ready = true;
+            pthread_cond_signal(&(listjob->job->thread_data->cond));
+            pthread_mutex_unlock(&(listjob->job->thread_data->mutex));
+
+            free(end_message);
             fclose(file);
             remove(filename);
             free(filename);
