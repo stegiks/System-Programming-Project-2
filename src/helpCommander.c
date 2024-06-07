@@ -227,52 +227,99 @@ void recieve_response(int sock, char* command){
             print_error_and_die("jobCommander : Error reading the EXIT message from the server");
         
         // Get pass the length of the message
-        char* response = (char*)(buffer + sizeof(uint32_t));
-        printf("jobCommander : %s\n", response);
+        uint32_t length_of_message;
+        memcpy(&length_of_message, buffer, sizeof(uint32_t));
+        printf("jobCommander : Length of message %d\n", length_of_message);
+        
+        char* response = malloc(length_of_message - sizeof(uint32_t) + 1);
+        memcpy(response, buffer + sizeof(uint32_t), length_of_message - sizeof(uint32_t));
+        response[length_of_message - sizeof(uint32_t)] = '\0';
+
+        printf("%s\n", response);
+        free(response);
     }
     else if(strcmp(command, "poll") == 0){
-        if(m_read(sock, &buffer) == -1)
-            print_error_and_die("jobCommander : Error reading the POLL message from the server");
-        
-        // Parse the buffer and print the results
-        // The format will be : 
-        // [length_of_message] [number of jobs] [length of jobID] [jobID] [length of job] [job] ... OR
-        // [length_of_message] [number of jobs] [message]
-        void* buffer_ptr = buffer;
-        uint32_t length_of_message;
-        memcpy(&length_of_message, buffer_ptr, sizeof(uint32_t));
-        buffer_ptr += sizeof(uint32_t);
 
         uint32_t number_of_jobs;
-        memcpy(&number_of_jobs, buffer_ptr, sizeof(uint32_t));
-        buffer_ptr += sizeof(uint32_t);
-        printf("jobCommander : POLL\n");
+        if(read(sock, &number_of_jobs, sizeof(uint32_t)) == -1)
+            print_error_and_die("jobCommander : Error reading the number of jobs from the server");
 
         if(number_of_jobs == 0){
-            uint32_t len_response = length_of_message - sizeof(uint32_t);
-            char* response = malloc(len_response + 1);
-            if(!response)
-                print_error_and_die("jobCommander : Error allocating memory for response");
+            if(m_read(sock, &buffer) == -1)
+                print_error_and_die("jobCommander : Error reading the POLL message from the server");
             
-            memcpy(response, buffer, len_response);
-            response[len_response] = '\0';
-            
+            // Get pass the length of the message
+            uint32_t length_of_message;
+            memcpy(&length_of_message, buffer, sizeof(uint32_t));
+            printf("jobCommander : Length of message %d\n", length_of_message);
+        
+            char* response = malloc(length_of_message - sizeof(uint32_t) + 1);
+            memcpy(response, buffer + sizeof(uint32_t), length_of_message - sizeof(uint32_t));
+            response[length_of_message - sizeof(uint32_t)] = '\0';
+
             printf("%s\n", response);
             free(response);
         }
         else{
             for(uint32_t i = 0; i < number_of_jobs; i++){
-                char* jobid;
-                char* job;
-
-                read_poll_message(buffer_ptr, &jobid, &job);
-                printf("<%s , %s>\n", jobid, job);
+                //! START JOBID
+                if(m_read(sock, &buffer) == -1)
+                    print_error_and_die("jobCommander : Error reading the POLL message from the server");
                 
+                uint32_t length_of_jobid;
+                memcpy(&length_of_jobid, buffer, sizeof(uint32_t));
+
+                char* jobid = malloc(length_of_jobid + 1);
+                if(!jobid)
+                    print_error_and_die("jobCommander : Error allocating memory for jobid");
+                
+                memcpy(jobid, buffer + sizeof(uint32_t), length_of_jobid);
+                jobid[length_of_jobid] = '\0';
+                //! END JOBID
+
+                printf("<%s , ", jobid);
+                memset(buffer, 0, length_of_jobid);
                 free(jobid);
-                free(job);
+                free(buffer);
+
+                //! START JOB
+                // job may be coming in chunks
+                while(true){
+                    if(m_read(sock, &buffer) == -1)
+                        print_error_and_die("jobCommander : Error reading the POLL message from the server");
+                    
+                    // Get the length of the message
+                    uint32_t length_of_job;
+                    memcpy(&length_of_job, buffer, sizeof(uint32_t));
+
+                    // Get the type of message
+                    int type;
+                    memcpy(&type, buffer + sizeof(uint32_t), sizeof(int));
+
+                    // Get the message
+                    char* message = (char*)(buffer + sizeof(uint32_t) + sizeof(int));
+                    
+                    // Check type to handle
+                    if(type == 1){
+                        // Response chunk
+                        printf("%s", message);
+                    }
+                    else{
+                        // End of response
+                        printf("%s>\n", message);
+                        if(i != number_of_jobs - 1){
+                            memset(buffer, 0, length_of_job);
+                            free(buffer);
+                        }
+                        break;
+                    }
+
+                    // Memset to 0 before freeing
+                    memset(buffer, 0, length_of_job);
+                    free(buffer);
+                }
             }
         }
-
     }
     else{
         pid_t pid = getpid();

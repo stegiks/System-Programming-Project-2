@@ -163,10 +163,9 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
         memcpy(response, &type, sizeof(int));
         memcpy(response + sizeof(int), message + bytes_written, size_to_write);
 
-        ssize_t n;
         uint32_t total_size = size_to_write + sizeof(int) + sizeof(uint32_t);
         printf("Controller %ld : Total size is %d\n", pthread_self(), total_size);
-        if((n = m_write(client_sock, response, total_size)) == -1)
+        if(m_write(client_sock, response, total_size) == -1)
             print_error_and_die("jobExecutorServer : Error writing response to client");
         
         bytes_written += size_to_write;
@@ -184,6 +183,14 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
     Set the concurrency of the server and respond to the client.
 */
 void setConcurrency(void* buffer, int client_sock){
+    size_t length_of_setconcurrency;
+    memcpy(&length_of_setconcurrency, buffer, sizeof(size_t));
+    buffer += sizeof(size_t);
+    
+    // Get pass string of setConcurrency
+    buffer += length_of_setconcurrency;
+
+    // Get the length of the new concurrency
     size_t length_of_concurrency;
     memcpy(&length_of_concurrency, buffer, sizeof(size_t));
     buffer += sizeof(size_t);
@@ -198,6 +205,8 @@ void setConcurrency(void* buffer, int client_sock){
     pthread_mutex_lock(&global_vars_mutex);
     int old_concurrency = concurrency;
     concurrency = atoi(new_concurrency);
+    printf("Controller %ld : The string of new concurrency is %s\n", pthread_self(), new_concurrency);
+    printf("Controller %ld : Concurrency set to %d\n", pthread_self(), concurrency);
 
     // Signal the worker threads to check the new concurrency
     // ! BROADCAST BETTER TO 
@@ -212,15 +221,6 @@ void setConcurrency(void* buffer, int client_sock){
 
     // Send the response : CONCURRENCY SET AT Ν
     uint32_t lenght_of_response = 19 + find_digits(concurrency);
-    void* response_start = malloc(lenght_of_response + sizeof(uint32_t));
-    if(!response_start)
-        print_error_and_die("jobExecutorServer : Error allocating memory for response");
-    
-    void* response = response_start;
-    memcpy(response, &lenght_of_response, sizeof(uint32_t));
-    response += sizeof(uint32_t);
-
-    // Construct the message
     char* message = malloc(lenght_of_response + 1);
     if(!message)
         print_error_and_die("jobExecutorServer : Error allocating memory for message");
@@ -228,21 +228,27 @@ void setConcurrency(void* buffer, int client_sock){
     sprintf(message, "CONCURRENCY SET AT %d", concurrency);
     pthread_mutex_unlock(&global_vars_mutex);
     message[lenght_of_response] = '\0';
-    memcpy(response, message, lenght_of_response);
 
     // Write the response to the client
-    if(m_write(client_sock, response_start, lenght_of_response + sizeof(uint32_t)) == -1)
+    if(m_write(client_sock, (void*)message, lenght_of_response + sizeof(uint32_t)) == -1)
         print_error_and_die("jobExecutorServer : Error writing response to client");
     
+    printf("Controller %ld : message = %s\n", pthread_self(), message);
     free(new_concurrency);
     free(message);
-    free(response_start);
 }
 
 /*
     Remove a job from the buffer and respond to the client.
 */
 void stopJob(void* buffer, int client_sock){
+    size_t length_of_stop;
+    memcpy(&length_of_stop, buffer, sizeof(size_t));
+    buffer += sizeof(size_t);
+
+    // Get pass string of stop
+    buffer += length_of_stop;
+
     size_t length_of_jobid;
     memcpy(&length_of_jobid, buffer, sizeof(size_t));
     buffer += sizeof(size_t);
@@ -253,6 +259,8 @@ void stopJob(void* buffer, int client_sock){
     
     memcpy(jobid, buffer, length_of_jobid);
     jobid[length_of_jobid] = '\0';
+
+    printf("Controller %ld : Searching for a jobid with value = %s\n", pthread_self(), jobid);
 
     // Find the job in the shared buffer, so use the mutex for safety
     pthread_mutex_lock(&buffer_mutex);
@@ -289,17 +297,10 @@ void stopJob(void* buffer, int client_sock){
     // Send response depending on the result
     // Found : JOB <jobID> REMOVED
     // Not found : JOB <jobID> NOTFOUND
-    uint32_t lenght_of_response = (found) ? (12 + length_of_jobid) : (13 + length_of_jobid);
-    void* response_start = malloc(lenght_of_response + sizeof(uint32_t));
-    if(!response_start)
-        print_error_and_die("jobExecutorServer : Error allocating memory for response");
-    
-    void* response = response_start;
-    memcpy(response, &lenght_of_response, sizeof(uint32_t));
-    response += sizeof(uint32_t);
+    uint32_t lenght_of_message = (found) ? (12 + length_of_jobid) : (13 + length_of_jobid);
 
     // Construct message
-    char* message = malloc(lenght_of_response + 1);
+    char* message = malloc(lenght_of_message + 1);
     if(!message)
         print_error_and_die("jobExecutorServer : Error allocating memory for message");
     
@@ -308,15 +309,13 @@ void stopJob(void* buffer, int client_sock){
     else
         sprintf(message, "JOB %s NOTFOUND", jobid);
     
-    message[lenght_of_response] = '\0';
-    memcpy(response, message, lenght_of_response);
+    message[lenght_of_message] = '\0';
 
-    if(m_write(client_sock, response_start, lenght_of_response + sizeof(uint32_t)) == -1)
+    if(m_write(client_sock, (void*)(message), lenght_of_message + sizeof(uint32_t)) == -1)
         print_error_and_die("jobExecutorServer : Error writing response to client");
     
     free(jobid);
     free(message);
-    free(response_start);
 }
 
 /*
@@ -330,23 +329,13 @@ void pollJob(int client_sock){
     pthread_mutex_lock(&buffer_mutex);
     uint32_t number_of_jobs = buffer_with_tasks->size;
 
-    void* response_start = NULL;
     if(number_of_jobs == 0){
         // Here we can release the mutex because we are not going to change the buffer
         pthread_mutex_unlock(&buffer_mutex);
 
         // Send response : [number of jobs] NO JOBS IN BUFFER
-        uint32_t lenght_of_response = 17 + sizeof(uint32_t);
-        response_start = malloc(lenght_of_response + sizeof(uint32_t));
-        if(!response_start)
-            print_error_and_die("jobExecutorServer : Error allocating memory for response");
-        
-        void* response = response_start;
-        memcpy(response, &lenght_of_response, sizeof(uint32_t));
-        response += sizeof(uint32_t);
-
-        memcpy(response, &number_of_jobs, sizeof(uint32_t));
-        response += sizeof(uint32_t);
+        if(write(client_sock, &number_of_jobs, sizeof(uint32_t)) == -1)
+            print_error_and_die("jobExecutorServer : Error writing response to client");
 
         // Construct message
         uint32_t length_of_message = 17;
@@ -356,65 +345,69 @@ void pollJob(int client_sock){
         
         sprintf(message, "NO JOBS IN BUFFER");
         message[length_of_message] = '\0';
-        memcpy(response, message, length_of_message);
 
-        if(m_write(client_sock, response_start, lenght_of_response + sizeof(uint32_t)) == -1)
+        if(m_write(client_sock, (void*)(message), length_of_message + sizeof(uint32_t)) == -1)
             print_error_and_die("jobExecutorServer : Error writing response to client");
         
         free(message);
     }
     else{
         // Send response : 
-        // [length] [number of jobs] [length of jobid1] [jobid1] [length of job1] [job1] ...
-        // Find length of the message
-        uint32_t length_of_message = 0;
-
-        ListNode current = buffer_with_tasks->head;
-        while(current != NULL){
-            length_of_message += 2 * sizeof(size_t) + strlen(current->job->jobid) + strlen(current->job->command);
-            current = current->next;
-        }
-
-        length_of_message += sizeof(uint32_t);
-        response_start = malloc(length_of_message + sizeof(uint32_t)); 
-        if(!response_start)
-            print_error_and_die("jobExecutorServer : Error allocating memory for response");
-        
-        void* response = response_start;
-        memcpy(response, &length_of_message, sizeof(uint32_t));
-        response += sizeof(uint32_t);
-
-        memcpy(response, &number_of_jobs, sizeof(uint32_t));
-        response += sizeof(uint32_t);
-
-        current = buffer_with_tasks->head;
-        while(current != NULL){
-            size_t length_of_jobid = strlen(current->job->jobid);
-            size_t length_of_command = strlen(current->job->command);
-
-            memcpy(response, &length_of_jobid, sizeof(size_t));
-            response += sizeof(size_t);
-
-            memcpy(response, current->job->jobid, length_of_jobid);
-            response += length_of_jobid;
-
-            memcpy(response, &length_of_command, sizeof(size_t));
-            response += sizeof(size_t);
-
-            memcpy(response, current->job->command, length_of_command);
-            response += length_of_command;
-
-            current = current->next;
-        }
-
-        if(m_write(client_sock, response_start, length_of_message + sizeof(uint32_t)) == -1)
+        // [number of jobs] [length of jobid1] [jobid1] [length of job1] [job1] ...
+        // Send [number of jobs] first
+        // Then send [length of jobid] [jobid] [length of job] [job] for each job seperately
+        if(write(client_sock, &number_of_jobs, sizeof(uint32_t)) == -1)
             print_error_and_die("jobExecutorServer : Error writing response to client");
         
+        ListNode current = buffer_with_tasks->head;
+        while(current != NULL){
+            size_t length_of_jobid = strlen(current->job->jobid);
+            if(m_write(client_sock, current->job->jobid, length_of_jobid + sizeof(size_t)) == -1)
+                print_error_and_die("jobExecutorServer : Error writing response to client");
+            
+            // job command must be written in chunks of CHUNKSIZE
+            // because it may be too big. Before each chunk we write
+            // an integer to indicate the type of message. 1 for non-final and -1 for final
+            uint32_t bytes_written = 0;
+            uint32_t bytes_left = strlen(current->job->command);
+            while(bytes_written < strlen(current->job->command)){
+                uint32_t size_to_write;
+                int type;
+
+                // Set the size to write and the type of chunk
+                if(bytes_left > CHUNKSIZE){
+                    size_to_write = CHUNKSIZE;
+                    type = 1;
+                }
+                else{
+                    size_to_write = bytes_left;
+                    type = -1;
+                }
+
+                void* response = malloc(size_to_write + sizeof(int));
+                if(!response)
+                    print_error_and_die("jobExecutorServer : Error allocating memory for response");
+                
+                memcpy(response, &type, sizeof(int));
+                memcpy(response + sizeof(int), current->job->command + bytes_written, size_to_write);
+
+                uint32_t total_size = size_to_write + sizeof(int) + sizeof(uint32_t);
+                printf("Controller %ld : Total size is %d\n", pthread_self(), total_size);
+                if(m_write(client_sock, response, total_size)== -1)
+                    print_error_and_die("jobExecutorServer : Error writing response to client");
+                
+                bytes_written += size_to_write;
+                bytes_left -= size_to_write;
+
+                free(response);
+            }
+            
+            current = current->next;
+
+        }
 
         pthread_mutex_unlock(&buffer_mutex);
     }
-
-    free(response_start);
 }
 
 /*
@@ -513,6 +506,9 @@ void* controller_function(void* arg){
     printf("Controller %ld : Reading command\n", pthread_self());
     readCommand(client_sock, &buffer_start, &buffer_ptr, &length_of_message, &number_of_args, &length_of_command, &command);
     printf("Controller %ld : Command read\n", pthread_self());
+
+    if(command)
+        printf("Controller %ld : Command is %s\n", pthread_self(), command);
 
     // Handle each command differently
     ThreadData thread_data = NULL;
