@@ -196,7 +196,9 @@ void send_command(int sock, int argc, char** argv){
     free(message);
 }
 
-
+/*
+    This function prints the file to the standard output.
+*/
 void print_file(char* file){
     FILE* f = fopen(file, "r");
     if(!f)
@@ -211,6 +213,22 @@ void print_file(char* file){
     fclose(f);
 }
 
+/*
+    This function initializes the file names for the output
+    and response files. The file names are in the format
+    /tmp/res_pid.txt and /tmp/out_pid.txt
+*/
+char* init_file_names(const char* pid, const char* type){
+    size_t length = strlen("/tmp/") + strlen(type) + strlen(pid) + strlen(".txt") + 1;
+    char* file = malloc(length + 1);
+    if(!file)
+        print_error_and_die("jobCommander : Error allocating memory for file");
+    
+    file[length] = '\0';
+    sprintf(file, "/tmp/%s_%s.txt", type, pid);
+    return file;
+}
+
 
 /*
     This function reads the response from the server.
@@ -219,10 +237,9 @@ void print_file(char* file){
     command if the command was issueJob.
 */
 void recieve_response(int sock, char* command){
-    
-    void* buffer = NULL;
 
     if((strcmp(command, "exit") == 0) || (strcmp(command, "stop") == 0) || (strcmp(command, "setConcurrency") == 0)){
+        void* buffer = NULL;
         if(m_read(sock, &buffer) == -1)
             print_error_and_die("jobCommander : Error reading the EXIT message from the server");
         
@@ -237,13 +254,14 @@ void recieve_response(int sock, char* command){
 
         printf("%s\n", response);
         free(response);
+        free(buffer);
     }
     else if(strcmp(command, "poll") == 0){
-
         uint32_t number_of_jobs;
         if(read(sock, &number_of_jobs, sizeof(uint32_t)) == -1)
             print_error_and_die("jobCommander : Error reading the number of jobs from the server");
 
+        void* buffer = NULL;
         if(number_of_jobs == 0){
             if(m_read(sock, &buffer) == -1)
                 print_error_and_die("jobCommander : Error reading the POLL message from the server");
@@ -259,6 +277,7 @@ void recieve_response(int sock, char* command){
 
             printf("%s\n", response);
             free(response);
+            free(buffer);
         }
         else{
             for(uint32_t i = 0; i < number_of_jobs; i++){
@@ -268,7 +287,9 @@ void recieve_response(int sock, char* command){
                 
                 uint32_t length_of_jobid;
                 memcpy(&length_of_jobid, buffer, sizeof(uint32_t));
+                length_of_jobid -= sizeof(uint32_t);
 
+                printf("Length of jobid = %d\n", length_of_jobid);
                 char* jobid = malloc(length_of_jobid + 1);
                 if(!jobid)
                     print_error_and_die("jobCommander : Error allocating memory for jobid");
@@ -278,7 +299,8 @@ void recieve_response(int sock, char* command){
                 //! END JOBID
 
                 printf("<%s , ", jobid);
-                memset(buffer, 0, length_of_jobid);
+                memset(buffer, 0, length_of_jobid + sizeof(uint32_t));
+                memset(jobid, 0, length_of_jobid);
                 free(jobid);
                 free(buffer);
 
@@ -291,13 +313,19 @@ void recieve_response(int sock, char* command){
                     // Get the length of the message
                     uint32_t length_of_job;
                     memcpy(&length_of_job, buffer, sizeof(uint32_t));
+                    length_of_job = length_of_job - sizeof(uint32_t) - sizeof(int);
 
                     // Get the type of message
                     int type;
                     memcpy(&type, buffer + sizeof(uint32_t), sizeof(int));
 
                     // Get the message
-                    char* message = (char*)(buffer + sizeof(uint32_t) + sizeof(int));
+                    char* message = malloc(length_of_job + 1);
+                    if(!message)
+                        print_error_and_die("jobCommander : Error allocating memory for message");
+                    
+                    memcpy(message, buffer + sizeof(uint32_t) + sizeof(int), length_of_job);
+                    message[length_of_job] = '\0';
                     
                     // Check type to handle
                     if(type == 1){
@@ -307,15 +335,17 @@ void recieve_response(int sock, char* command){
                     else{
                         // End of response
                         printf("%s>\n", message);
-                        if(i != number_of_jobs - 1){
-                            memset(buffer, 0, length_of_job);
-                            free(buffer);
-                        }
+                        memset(buffer, 0, length_of_job + sizeof(uint32_t) + sizeof(int));
+                        memset(message, 0, length_of_job);
+                        free(message);
+                        free(buffer);
                         break;
                     }
 
                     // Memset to 0 before freeing
-                    memset(buffer, 0, length_of_job);
+                    memset(buffer, 0, length_of_job + sizeof(uint32_t) + sizeof(int));
+                    memset(message, 0, length_of_job);
+                    free(message);
                     free(buffer);
                 }
             }
@@ -330,29 +360,22 @@ void recieve_response(int sock, char* command){
         
         sprintf(pid_string, "%d", pid);
 
-        char* file_response = malloc(strlen("/tmp/res_") + strlen(pid_string) + strlen(".txt") + 1);
-        if(!file_response)
-            print_error_and_die("jobCommander : Error allocating memory for file_response");
-        
-        sprintf(file_response, "/tmp/res_%s.txt", pid_string);
-
-        char* file_output = malloc(strlen("/tmp/out_") + strlen(pid_string) + strlen(".txt") + 1);
-        if(!file_output)
-            print_error_and_die("jobCommander : Error allocating memory for file_output");
-        
-        sprintf(file_output, "/tmp/out_%s.txt", pid_string);
-
-        FILE* file_res = fopen(file_response, "a+");
-        if(!file_res)
+        // Initialize the file names
+        char* file_response = init_file_names(pid_string, "res");
+        char* file_output = init_file_names(pid_string, "out");
+    
+        int fd_res;
+        if((fd_res = m_open(file_response, O_CREAT | O_RDWR | O_APPEND)) == -1)
             print_error_and_die("jobCommander : Error opening the file %s", file_response);
         
-        FILE* file_out = fopen(file_output, "a+");
-        if(!file_out)
+        int fd_out;
+        if((fd_out = m_open(file_output, O_CREAT | O_RDWR | O_APPEND)) == -1)
             print_error_and_die("jobCommander : Error opening the file %s", file_output);
         
-        bool output_done = false, res_done = false;
+        bool output_done = false, res_done = false, terminated = false;
 
-        while(!(output_done) || !(res_done)){
+        while((!(output_done) || !(res_done)) && !(terminated)){
+            void* buffer = NULL;
             if(m_read(sock, &buffer) == -1)
                 print_error_and_die("jobCommander : Error reading the response from the server");
             
@@ -370,17 +393,17 @@ void recieve_response(int sock, char* command){
             // Check type to handle
             if(type == 1){
                 // Response chunk
-                if(write(fileno(file_res), message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                if(write(fd_res, message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
                     print_error_and_die("jobCommander : Error writing to the file %s", file_response);
             }
             else if(type == 2){
                 // Output chunk
-                if(write(fileno(file_out), message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                if(write(fd_out, message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
                     print_error_and_die("jobCommander : Error writing to the file %s", file_output);
             }
             else if(type == -1){
                 // End of response
-                if(write(fileno(file_res), message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                if(write(fd_res, message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
                     print_error_and_die("jobCommander : Error writing to the file %s", file_response);
                 
                 res_done = true;
@@ -388,32 +411,44 @@ void recieve_response(int sock, char* command){
             }
             else if(type == -2){
                 // End of output
-                if(write(fileno(file_out), message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                if(write(fd_out, message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
                     print_error_and_die("jobCommander : Error writing to the file %s", file_output);
                 
                 output_done = true;
                 print_file(file_output);
             }
+            else if(type == 0){
+                // Termination before submitting the job
+                terminated = true;
+                uint32_t length = length_of_message - sizeof(int) - sizeof(uint32_t);
+                char* termination_message = malloc(length + 1);
+                if(!termination_message)
+                    print_error_and_die("jobCommander : Error allocating memory for termination_message");
+                
+                memcpy(termination_message, message, length);
+                termination_message[length] = '\0';
+                printf("%s\n", termination_message);
+                free(termination_message);
+            }
 
             // Memset to 0 before freeing
             memset(buffer, 0, length_of_message);
-            if(!(output_done) || !(res_done))
-                free(buffer);
+            free(buffer);
 
         }
 
-        fclose(file_res);
-        fclose(file_out);
+        if(m_close(fd_res) == -1)
+            print_error_and_die("jobCommander : Error closing the file %s", file_response);
+        
+        if(m_close(fd_out) == -1)
+            print_error_and_die("jobCommander : Error closing the file %s", file_output);
+
         remove(file_response);
         remove(file_output);
         free(file_response);
         free(file_output);
         free(pid_string);
     }
-    // If allocation wasn't successful then the 
-    // program will have already exited
-    if(buffer)
-        free(buffer);
 
     if(m_close(sock) == -1)
         print_error_and_die("jobCommander : Error closing the socket");

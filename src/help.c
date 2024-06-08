@@ -55,11 +55,11 @@ ssize_t m_write(int fd, const void* buffer, uint32_t total_length){
     if(write(fd, &total_length, sizeof(uint32_t)) == -1)
         return -1;
 
-    printf("m_write: Just wrote the total length of %d\n", total_length);
+    // printf("m_write: Just wrote the total length being %d\n", total_length);
 
     while(bytes_written < total_length){
         n = write(fd, buffer + bytes_written, bytes_left);
-        printf("m_write: Wrote another %ld bytes\n", n);
+        // printf("m_write: Wrote another %ld bytes\n", n);
         if(n == -1){
             if(errno == EINTR){
                 // write interrupted by signal, retry
@@ -95,7 +95,7 @@ ssize_t m_read(int fd, void** buffer){
         if(errno != EINTR)
             return -1;
     
-    printf("m_read : Total length is = %d\n", total_length);
+    // printf("m_read : Total length is = %d\n", total_length);
 
     // Allocate memory for the message
     *buffer = malloc(total_length);
@@ -110,7 +110,7 @@ ssize_t m_read(int fd, void** buffer){
     uint32_t bytes_left = total_length - sizeof(uint32_t);
     while(bytes_read < total_length){
         n = read(fd, (*buffer) + bytes_read, bytes_left);
-        printf("m_read : Read another %ld bytes\n", n);
+        // printf("m_read : Read another %ld bytes\n", n);
         if(n == -1){
             if(errno == EINTR){
                 // read interrupted by signal, retry
@@ -129,6 +129,18 @@ ssize_t m_read(int fd, void** buffer){
     }
 
     return bytes_read;
+}
+
+/*
+    This function opens a file descriptor
+*/
+int m_open(const char* pathname, int flags){
+    int fd;
+    while((fd = open(pathname, flags, PERMISSIONS)) == -1)
+        if(errno != EINTR)
+            return -1;
+    
+    return fd;
 }
 
 /*

@@ -54,7 +54,7 @@ run_executor: $(BIN)/jobExecutorServer
 clean:
 	find $(BUILD) -type f -name '*.o' -exec rm -f {} +
 	find $(BIN) -type f ! -name '*.txt' -exec rm -f {} +
-
+	
 # Valgrind
 valgrind_commander: $(BIN)/jobCommander
 	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes $(BIN)/jobCommander $(ARGS_COM)

@@ -21,4 +21,6 @@
 #include <stdarg.h>     // For variadic functions
 #include <ctype.h>
 
+#define PERMISSIONS 0666
+
 #endif /* defs.h */
