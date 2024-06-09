@@ -611,8 +611,10 @@ void* controller_function(void* arg){
     if((terminate) && (strcmp(command, "exit") == 0)){
         pthread_mutex_unlock(&terminate_mutex);
         printf("Controller %ld : Socket number %d is closing\n", pthread_self(), sock_server);
-        if(m_close(sock_server) == -1)
-            print_error_and_die("jobExecutorServer : Error closing server socket\n");
+        
+        // Close the socket with shutdown
+        if(shutdown(sock_server, SHUT_RD) == -1)
+            print_error_and_die("jobExecutorServer : Error shutting down server socket");
         
         printf("Controller %ld : Server socket closed\n", pthread_self());
     }
@@ -644,30 +646,24 @@ void* worker_function(){
         ListNode listjob = NULL;
         pthread_mutex_lock(&buffer_mutex);
         printf("Worker %ld : Locked buffer_mutex worker\n", pthread_self());
-        bool found_terminate = false;
         while(isEmpty(buffer_with_tasks)){
             pthread_cond_wait(&buffer_not_empty, &buffer_mutex);
             
             // Check for termination after possible broadcast 
             pthread_mutex_lock(&terminate_mutex);
             if(terminate){
-                found_terminate = true;
                 pthread_mutex_unlock(&terminate_mutex);
                 pthread_mutex_unlock(&buffer_mutex);
-                break;
+                return NULL;
             }
             pthread_mutex_unlock(&terminate_mutex); 
         }
-
-        if(found_terminate)
-            break;
 
         pthread_mutex_unlock(&buffer_mutex);
 
         // Check if concurrency level let us handle the job
         printf("Worker %ld : Locking global_vars_mutex worker\n", pthread_self());
         pthread_mutex_lock(&global_vars_mutex);
-        found_terminate = false;
         while (worker_threads_working >= concurrency){
             printf("Worker %ld : Worker waiting because of concurrency\n", pthread_self());
             pthread_cond_wait(&worker_cond, &global_vars_mutex);
@@ -678,16 +674,12 @@ void* worker_function(){
             // Check for termination
             pthread_mutex_lock(&terminate_mutex);
             if(terminate){
-                found_terminate = true;
                 pthread_mutex_unlock(&terminate_mutex);
                 pthread_mutex_unlock(&global_vars_mutex);
-                break;
+                return NULL;
             }
             pthread_mutex_unlock(&terminate_mutex);
         }
-
-        if(found_terminate)
-            break;
         
         worker_threads_working++;
         printf("Worker %ld : Worker threads working : %d\n", pthread_self(), worker_threads_working);
@@ -912,37 +904,39 @@ void create_connection(int* sock_server, uint16_t port){
     mutexes and condition variables.
 */
 void termination(){
-    pthread_mutex_lock(&buffer_mutex);
-    if(buffer_with_tasks->size > 0){
-        ListNode current = buffer_with_tasks->head;
-        while(current != NULL){
-            uint32_t length_of_message = 34;
-            char* message = malloc(length_of_message + 1);
-            if(!message)
-                print_error_and_die("jobExecutorServer : Error allocating memory for message");
+    // ! I MAY NOT NEED THIS CODE THAT IS COMMENTED
+    // pthread_mutex_lock(&buffer_mutex);
+    // if(buffer_with_tasks->size > 0){
+    //     ListNode current = buffer_with_tasks->head;
+    //     while(current != NULL){
+    //         uint32_t length_of_message = 34;
+    //         char* message = malloc(length_of_message + 1);
+    //         if(!message)
+    //             print_error_and_die("jobExecutorServer : Error allocating memory for message");
             
-            sprintf(message, "SERVER TERMINATED BEFORE EXECUTION");
-            message[34] = '\0';
+    //         sprintf(message, "SERVER TERMINATED BEFORE EXECUTION");
+    //         message[34] = '\0';
 
-            uint32_t total_size = 34 + sizeof(uint32_t);
-            if(m_write(current->job->fd, (void*)(message), total_size) == -1)
-                print_error_and_die("jobExecutorServer : Error writing response to client");
+    //         uint32_t total_size = 34 + sizeof(uint32_t);
+    //         if(m_write(current->job->fd, (void*)(message), total_size) == -1)
+    //             print_error_and_die("jobExecutorServer : Error writing response to client");
             
-            memset(message, 0, length_of_message + 1);
-            free(message);
+    //         memset(message, 0, length_of_message + 1);
+    //         free(message);
 
-            ListNode temp = current;
-            current = current->next;
+    //         ListNode temp = current;
+    //         current = current->next;
             
-            // Controller thread may wait to close the socket
-            pthread_mutex_lock(&(temp->job->thread_data->mutex));
-            temp->job->thread_data->worker_response_ready = true;
-            pthread_cond_signal(&(temp->job->thread_data->cond));
-            pthread_mutex_unlock(&(temp->job->thread_data->mutex));
+    //         // Controller thread may wait to close the socket
+    //         pthread_mutex_lock(&(temp->job->thread_data->mutex));
+    //         temp->job->thread_data->worker_response_ready = true;
+    //         pthread_cond_signal(&(temp->job->thread_data->cond));
+    //         pthread_mutex_unlock(&(temp->job->thread_data->mutex));
 
-            removeJob(buffer_with_tasks, temp->job->jobid);
-        }
-    }
+    //         removeJob(buffer_with_tasks, temp->job->jobid);
+    //     }
+    // }
+    // pthread_mutex_unlock(&buffer_mutex);
 
     cleanList(buffer_with_tasks);
 

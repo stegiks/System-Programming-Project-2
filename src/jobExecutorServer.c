@@ -51,7 +51,7 @@ int main(int argc, char* argv[]){
 
         pthread_mutex_lock(&terminate_mutex);
         if(terminate){
-            printf("Server is terminating\n");
+            printf("Server is terminating(1)\n");
             pthread_mutex_unlock(&terminate_mutex);
             break;
         }
@@ -60,8 +60,9 @@ int main(int argc, char* argv[]){
         int client_sock;
         printf("Waiting for connection...\n");
         if((client_sock = accept(sock_server, NULL, NULL)) < 0){
-            printf("Error accepting connection\n");
             pthread_mutex_lock(&terminate_mutex);
+            printf("Error accepting connection\n");
+            printf("errno = %d\n", errno);
             if((errno == EBADF) && terminate){
                 pthread_mutex_unlock(&terminate_mutex);
                 printf("Server socket close and it is terminating\n");
@@ -74,6 +75,14 @@ int main(int argc, char* argv[]){
                 print_error_and_die("jobExecutorServer : Error accepting connection");
             }
         }
+
+        pthread_mutex_lock(&terminate_mutex);
+        if(terminate){
+            printf("Server is terminating(2)\n");
+            pthread_mutex_unlock(&terminate_mutex);
+            break;
+        }
+        pthread_mutex_unlock(&terminate_mutex);
 
         // Gets freed in controller_function immediately
         int* sockets = malloc(sizeof(int) * 2);
@@ -91,6 +100,8 @@ int main(int argc, char* argv[]){
             print_error_and_die("jobExecutorServer : Error detaching controller thread");
     }
 
+    printf("Got out!!!\n");
+    fflush(stdout);
     // Join worker threads
     for(uint32_t i = 0; i < thread_pool_size; i++){
         if(pthread_join(worker_trheads[i], NULL))
