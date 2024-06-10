@@ -11,4 +11,6 @@ ssize_t m_read(int fd, void** buffer);
 int m_open(const char* pathname, int flags);
 int m_close(int fd); 
 
+#define CHUNKSIZE 1024
+
 #endif /* help.h */

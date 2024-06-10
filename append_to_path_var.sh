@@ -2,6 +2,7 @@
 
 # ! This file should be ran with the source command 
 # ! so the changes are kept in the shell that runs the script
+# ! example of usage: $ source append_to_path_var.sh
 
 # Get the absolute path to the bin directory
 BIN_DIR="${PWD}/bin"

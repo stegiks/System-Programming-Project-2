@@ -42,5 +42,6 @@ void appendJob(List list, Job job);
 ListNode dequeueJob(List list);
 void removeJob(List list, char* jobid);
 void cleanList(List list);
+void freeListNode(ListNode node);
 
 #endif /* listjobs.h */

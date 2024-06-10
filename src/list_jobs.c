@@ -129,3 +129,17 @@ void cleanList(List list){
 
     free(list);
 }
+
+/*
+    Free a ListNode
+*/
+void freeListNode(ListNode node){
+    free(node->job->jobid);
+    free(node->job->command);
+    for(uint32_t i = 0; i < node->job->number_of_args; i++){
+        free(node->job->arguments[i]);
+    }
+    free(node->job->arguments);
+    free(node->job);
+    free(node);
+}

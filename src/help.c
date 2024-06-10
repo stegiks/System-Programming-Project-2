@@ -37,7 +37,7 @@ void print_error_and_die(const char* msg, ...){
     fprintf(stderr, "\n");
 
     if(errno != 0)
-        fprintf(stderr, "Error : %s\n", strerror(errno));
+        fprintf(stderr, RED "Error: %s\n" RESET, strerror(errno));
     
     va_end(args);
     exit(1);

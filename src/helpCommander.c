@@ -200,17 +200,22 @@ void send_command(int sock, int argc, char** argv){
     This function prints the file to the standard output.
 */
 void print_file(char* file){
-    FILE* f = fopen(file, "r");
-    if(!f)
+    int file_descriptor;
+    if((file_descriptor = m_open(file, O_RDONLY)) == -1)
         print_error_and_die("jobCommander : Error opening the file %s", file);
     
-    char c;
-    while((c = fgetc(f)) != EOF)
-        printf("%c", c);
+    char buffer[CHUNKSIZE];
+    ssize_t bytes_read;
+    while((bytes_read = read(file_descriptor, buffer, CHUNKSIZE)) > 0)
+        write(STDOUT_FILENO, buffer, bytes_read);
+    
+    if(bytes_read == -1)
+        print_error_and_die("jobCommander : Error reading the file %s", file);
     
     printf("\n");
     
-    fclose(f);
+    if(m_close(file_descriptor) == -1)
+        print_error_and_die("jobCommander : Error closing the file %s", file);
 }
 
 /*

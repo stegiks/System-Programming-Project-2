@@ -2,6 +2,7 @@
 
 bool terminate = false;
 int worker_threads_working = 0;
+int active_controller_threads = 0;
 List buffer_with_tasks = NULL;
 uint32_t buffer_size;
 uint32_t thread_pool_size;
@@ -11,6 +12,7 @@ pthread_mutex_t global_vars_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t buffer_not_full = PTHREAD_COND_INITIALIZER;
 pthread_cond_t buffer_not_empty = PTHREAD_COND_INITIALIZER;
 pthread_cond_t worker_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t controller_cond = PTHREAD_COND_INITIALIZER;
 
 /*
     Main function for multi-threaded server where arguments
@@ -51,6 +53,9 @@ int main(int argc, char* argv[]){
 
         pthread_mutex_lock(&terminate_mutex);
         if(terminate){
+            if(active_controller_threads > 0)
+                pthread_cond_wait(&controller_cond, &terminate_mutex);
+            
             printf("Server is terminating(1)\n");
             pthread_mutex_unlock(&terminate_mutex);
             break;
@@ -63,9 +68,14 @@ int main(int argc, char* argv[]){
             pthread_mutex_lock(&terminate_mutex);
             printf("Error accepting connection\n");
             printf("errno = %d\n", errno);
-            if((errno == EBADF) && terminate){
+            if((errno == EINVAL) && terminate){
+                printf("Server socket closed\n");
+
+                if(active_controller_threads > 0)
+                    pthread_cond_wait(&controller_cond, &terminate_mutex);
+
+                printf("Server is terminating(2)\n");
                 pthread_mutex_unlock(&terminate_mutex);
-                printf("Server socket close and it is terminating\n");
                 break;
             }
             pthread_mutex_unlock(&terminate_mutex);
@@ -75,14 +85,6 @@ int main(int argc, char* argv[]){
                 print_error_and_die("jobExecutorServer : Error accepting connection");
             }
         }
-
-        pthread_mutex_lock(&terminate_mutex);
-        if(terminate){
-            printf("Server is terminating(2)\n");
-            pthread_mutex_unlock(&terminate_mutex);
-            break;
-        }
-        pthread_mutex_unlock(&terminate_mutex);
 
         // Gets freed in controller_function immediately
         int* sockets = malloc(sizeof(int) * 2);
@@ -109,6 +111,9 @@ int main(int argc, char* argv[]){
 
         printf("Worker thread number %d joined\n", i);
     }
+
+    // Free worker threads array
+    free(worker_trheads);
 
     // Check if some controller threads managed to put 
     // their jobs in the buffer after exit command was sent.
