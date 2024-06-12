@@ -697,9 +697,6 @@ void* worker_function(){
         while (worker_threads_working >= concurrency){
             printf(BLUE "Worker " RESET "%ld : Worker waiting because of concurrency\n", pthread_self());
             pthread_cond_wait(&worker_cond, &global_vars_mutex);
-            // printf("Worker %ld : Worker woke up\n", pthread_self());
-            // printf("Worker %ld : Worker threads working : %d\n", pthread_self(), worker_threads_working);
-            // printf("Concurrent threads : %d\n", concurrency);
 
             // Check for termination
             pthread_mutex_lock(&terminate_mutex);
@@ -737,23 +734,37 @@ void* worker_function(){
         // Handle job
         pid_t pid = fork();
         if(pid == 0){
+
             // Create file for output
-            // filename will be a cause of leaks, let OS handle it
+            char filename[50];
             pid_t child_pid = getpid();
             uint64_t digits = find_digits(child_pid);
-            char* filename = (char*)malloc(digits + 13);
             sprintf(filename, "/tmp/%d.output", child_pid);
             filename[digits + 12] = '\0';
 
-            int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-
             // Redirect stdout output to fd
-            dup2(fd, 1);
-            close(fd);
+            int fd;
+            if((fd = m_open(filename, O_WRONLY | O_CREAT | O_TRUNC)) == -1){
+                perror("jobExecutorServer : Error opening file");
+                _exit(1);
+            }
+
+            if(dup2(fd, STDOUT_FILENO) == -1){
+                perror("jobExecutorServer : Error duplicating file descriptor");
+                _exit(1);
+            }
+
+            if(m_close(fd) == -1){
+                perror("jobExecutorServer : Error closing file descriptor");
+                _exit(1);
+            }
 
             // Execute the job
             execvp(listjob->job->arguments[1], (listjob->job->arguments + 1));
-            print_error_and_die("jobExecutorServer : Error executing job");
+
+            // Use _exit to avoid cleanups that may affect the parent
+            perror("jobExecutorServer : Error executing job");
+            _exit(1);
         }
         else if(pid > 0){
             waitpid(pid, NULL, 0);
