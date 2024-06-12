@@ -1,13 +1,14 @@
 #ifndef HELPSERVER_H
 #define HELPSERVER_H
 
-#include "listjobs.h"
+#include "queue.h"
 #define MAX_CONNECTIONS 100
 
 extern bool terminate; 
 extern int worker_threads_working;
 extern int active_controller_threads;
-extern List buffer_with_tasks;
+extern int concurrency;
+extern Queue buffer_with_tasks;
 extern uint32_t buffer_size;
 extern uint32_t thread_pool_size;
 extern pthread_mutex_t buffer_mutex;
@@ -21,7 +22,7 @@ extern pthread_cond_t controller_cond;
 void* controller_function(void* arg);
 void* worker_function();
 bool validate_arguments(int argc, char** argv);
-void create_connection(int* sock_server, uint16_t port);
+bool create_connection(int* sock_server, uint16_t port);
 void termination();
 
 #endif /* helpserver.h */

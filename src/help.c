@@ -44,6 +44,15 @@ void print_error_and_die(const char* msg, ...){
 }
 
 /*
+    This function is used to memset a buffer to 0 and free it.
+    This is done for safety, for buffers that get freed and have to be allocated again.
+*/
+void memsetzero_and_free(void* buffer, size_t size){
+    memset(buffer, 0, size);
+    free(buffer);
+}
+
+/*
     This function writes to a file descriptor
     the given buffer with the given length
 */
@@ -55,11 +64,8 @@ ssize_t m_write(int fd, const void* buffer, uint32_t total_length){
     if(write(fd, &total_length, sizeof(uint32_t)) == -1)
         return -1;
 
-    // printf("m_write: Just wrote the total length being %d\n", total_length);
-
     while(bytes_written < total_length){
         n = write(fd, buffer + bytes_written, bytes_left);
-        // printf("m_write: Wrote another %ld bytes\n", n);
         if(n == -1){
             if(errno == EINTR){
                 // write interrupted by signal, retry
@@ -94,8 +100,6 @@ ssize_t m_read(int fd, void** buffer){
     while((n = read(fd, &total_length, sizeof(uint32_t))) == -1)
         if(errno != EINTR)
             return -1;
-    
-    // printf("m_read : Total length is = %d\n", total_length);
 
     // Allocate memory for the message
     *buffer = malloc(total_length);
@@ -110,7 +114,6 @@ ssize_t m_read(int fd, void** buffer){
     uint32_t bytes_left = total_length - sizeof(uint32_t);
     while(bytes_read < total_length){
         n = read(fd, (*buffer) + bytes_read, bytes_left);
-        // printf("m_read : Read another %ld bytes\n", n);
         if(n == -1){
             if(errno == EINTR){
                 // read interrupted by signal, retry

@@ -16,8 +16,6 @@ int main(int argc, char *argv[]) {
     time_t start_time;
     time(&start_time); // Get current time
     
-    printf("Start time: %s", ctime(&start_time)); // Print starting time
-    
     for (int i = 0; i < delay; i++) {
         sleep(1);
         printf("$");

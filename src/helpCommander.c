@@ -1,32 +1,44 @@
 #include "../include/helpcommander.h"
 
-/*
-    This function reads the poll message from the server.
-    The format will be : 
-    [length of jobID] [jobID] [length of job] [job]
-*/
-void read_poll_message(void* buffer, char** jobid, char** job){
-    uint32_t length_of_jobid;
-    memcpy(&length_of_jobid, buffer, sizeof(uint32_t));
-    buffer += sizeof(uint32_t);
-    *jobid = malloc(length_of_jobid + 1);
-    if(!(*jobid))
-        print_error_and_die("jobCommander : Error allocating memory for jobid");
-    
-    memcpy(*jobid, buffer, length_of_jobid);
-    (*jobid)[length_of_jobid] = '\0';
-    buffer += length_of_jobid;
 
-    uint32_t length_of_job;
-    memcpy(&length_of_job, buffer, sizeof(uint32_t));
-    buffer += sizeof(uint32_t);
-    *job = malloc(length_of_job + 1);
-    if(!(*job))
-        print_error_and_die("jobCommander : Error allocating memory for job");
+/*
+    This function prints the file to the standard output.
+*/
+void print_file(char* file){
+    int file_descriptor;
+    if((file_descriptor = m_open(file, O_RDONLY)) == -1)
+        print_error_and_die("jobCommander : Error opening the file %s", file);
     
-    memcpy(*job, buffer, length_of_job);
-    (*job)[length_of_job] = '\0';
-    buffer += length_of_job;
+    char buffer[CHUNKSIZE];
+    ssize_t bytes_read;
+    while((bytes_read = read(file_descriptor, buffer, CHUNKSIZE)) > 0)
+        write(STDOUT_FILENO, buffer, bytes_read);
+    
+    if(bytes_read == -1)
+        print_error_and_die("jobCommander : Error reading the file %s", file);
+    
+    printf("\n\n");
+    
+    if(m_close(file_descriptor) == -1)
+        print_error_and_die("jobCommander : Error closing the file %s", file);
+}
+
+
+/*
+    This function initializes the file names for the output
+    and response files. The file names are in the format
+    /tmp/res_pid.txt and /tmp/out_pid.txt
+*/
+char* init_file_names(const char* pid, const char* type){
+    // type can be either res or out
+    size_t length = strlen("/tmp/") + strlen(type) + strlen(pid) + strlen(".txt") + 1;
+    char* file = malloc(length + 1);
+    if(!file)
+        print_error_and_die("jobCommander : Error allocating memory for file");
+    
+    file[length] = '\0';
+    sprintf(file, "/tmp/%s_%s.txt", type, pid);
+    return file;
 }
 
 
@@ -34,21 +46,49 @@ void read_poll_message(void* buffer, char** jobid, char** job){
     This function prints the usage of the jobCommander.
     It prints the available commands and their description.
 */
-void usage_commander(){
-    int white_space1 = 10;
-    int white_space2 = 20;
-    printf("Usage : ./jobCommander [serverName] [portNum] [jobCommanderInputCommand]\n\n");
-    printf("Available commands are:\n\n");
-    printf("%*s%s", white_space1, "", "1. issueJob <job> :\n");
-    printf("%*s%s", white_space2, "", "Send a job for execution to the server, where job is a UNIX like command\n\n");
-    printf("%*s%s", white_space1, "", "2. setConcurrency <N>\n");
-    printf("%*s%s", white_space2, "", "Set the maximum number of jobs that can be run concurrently to N (N > 0)\n\n");
-    printf("%*s%s", white_space1, "", "3, stop <jobID> :\n");
-    printf("%*s%s", white_space2, "", "Stop (remove it from the buffer) the job with the given jobID\n\n");
-    printf("%*s%s", white_space1, "", "4. poll :\n");
-    printf("%*s%s", white_space2, "", "Print the job's ID and the job itself for all jobs in the buffer\n\n");
-    printf("%*s%s", white_space1, "", "5. exit :\n");
-    printf("%*s%s", white_space2, "", "Terminates the jobExecutorServer which handles all the jobs\n\n");
+void usage_commander() {
+    printf(BLUE "Usage:" RESET " ./jobCommander [serverName] [portNum] [jobCommanderInputCommand]\n\n");
+    printf(GREEN "Available commands are:\n\n" RESET);
+
+    printf(CYAN "+------------------------------+\n" RESET);
+    printf(CYAN "| " RESET MAGENTA "1. issueJob <job>            " RESET CYAN "|\n" RESET);
+    printf(CYAN "+------------------------------+\n" RESET);
+    printf(CYAN "| " RESET YELLOW "Send a job for execution to  " RESET CYAN "|\n" RESET);
+    printf(CYAN "| " RESET YELLOW "the server, where job is a   " RESET CYAN "|\n" RESET);
+    printf(CYAN "| " RESET YELLOW "UNIX like command.           " RESET CYAN "|\n" RESET);
+    printf(CYAN "+------------------------------+\n\n" RESET);
+
+    printf(CYAN "+------------------------------+\n" RESET);
+    printf(CYAN "| " RESET MAGENTA "2. setConcurrency <N>        " RESET CYAN "|\n" RESET);
+    printf(CYAN "+------------------------------+\n" RESET);
+    printf(CYAN "| " RESET YELLOW "Set the maximum number of    " RESET CYAN "|\n" RESET);
+    printf(CYAN "| " RESET YELLOW "jobs that can be run         " RESET CYAN "|\n" RESET);
+    printf(CYAN "| " RESET YELLOW "concurrently to N (N > 0).   " RESET CYAN "|\n" RESET);
+    printf(CYAN "+------------------------------+\n\n" RESET);
+
+    printf(CYAN "+------------------------------+\n" RESET);
+    printf(CYAN "| " RESET MAGENTA "3. stop <jobID>              " RESET CYAN "|\n" RESET);
+    printf(CYAN "+------------------------------+\n" RESET);
+    printf(CYAN "| " RESET YELLOW "Stop (remove it from         " RESET CYAN "|\n" RESET);
+    printf(CYAN "| " RESET YELLOW "the buffer) the job with the " RESET CYAN "|\n" RESET);
+    printf(CYAN "| " RESET YELLOW "given jobID.                 " RESET CYAN "|\n" RESET);
+    printf(CYAN "+------------------------------+\n\n" RESET);
+
+    printf(CYAN "+------------------------------+\n" RESET);
+    printf(CYAN "| " RESET MAGENTA "4. poll                      " RESET CYAN "|\n" RESET);
+    printf(CYAN "+------------------------------+\n" RESET);
+    printf(CYAN "| " RESET YELLOW "Print the job's ID and the   " RESET CYAN "|\n" RESET);
+    printf(CYAN "| " RESET YELLOW "job itself for all jobs in   " RESET CYAN "|\n" RESET);
+    printf(CYAN "| " RESET YELLOW "the buffer.                  " RESET CYAN "|\n" RESET);
+    printf(CYAN "+------------------------------+\n\n" RESET);
+
+    printf(CYAN "+------------------------------+\n" RESET);
+    printf(CYAN "| " RESET MAGENTA "5. exit                      " RESET CYAN "|\n" RESET);
+    printf(CYAN "+------------------------------+\n" RESET);
+    printf(CYAN "| " RESET YELLOW "Terminate the                " RESET CYAN "|\n" RESET);
+    printf(CYAN "| " RESET YELLOW "jobExecutorServer which      " RESET CYAN "|\n" RESET);
+    printf(CYAN "| " RESET YELLOW "handles all the jobs.        " RESET CYAN "|\n" RESET);
+    printf(CYAN "+------------------------------+\n\n" RESET);
 }
 
 
@@ -74,16 +114,14 @@ bool validate_command(int argc, char** argv, struct addrinfo** server_info){
     if(port < 0 || port > 65535)
         return false;
 
-
+    // Check if the hostname resolves to an IP address
     struct addrinfo hints;
     bzero(&hints, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = 0;
     hints.ai_flags = AI_CANONNAME;
-    printf("jobCommander : Checking if hostname resolves to an IP address\n");
     
-    // Check if the hostname resolves to an IP address
     if(getaddrinfo(argv[1], argv[2], &hints, server_info) != 0){
         printf("jobCommander : Hostname %s does not resolve to an IP address\n", argv[1]);
         return false;
@@ -126,9 +164,9 @@ bool validate_command(int argc, char** argv, struct addrinfo** server_info){
         }
     }
 
-    printf("jobCommander : Valid command\n");
     return true;
 }
+
 
 /*
     This function is used from client to make a connection
@@ -139,18 +177,14 @@ void login(int* sock, struct addrinfo** server_info, char* port){
     struct sockaddr *serverptr = (struct sockaddr *)(*server_info)->ai_addr;
 
     // Create socket
-    printf("jobCommander : Creating a socket\n");
     if((*sock = socket((*server_info)->ai_family, (*server_info)->ai_socktype, (*server_info)->ai_protocol)) < 0)
         print_error_and_die("jobCommander : Error creating a socket");     
-
-    printf("jobCommander : Socket created\n");
 
     // Initiate connection
     if(connect(*sock, serverptr, (*server_info)->ai_addrlen) < 0)
         print_error_and_die("jobCommander : Error connecting to the server with hostname %s and port %s\n", (*server_info)->ai_canonname, port);
-
-    printf("jobCommander : Connecting to %s port %s\n", (*server_info)->ai_canonname, port);
 }
+
 
 /*
     Send the command to the server for processing.
@@ -160,24 +194,23 @@ void login(int* sock, struct addrinfo** server_info, char* port){
 */
 void send_command(int sock, int argc, char** argv){
     
-    // Find how many bytes the command will take
     uint32_t command_length = 0;
     for(int i = 3; i < argc; i++)
         command_length += sizeof(size_t) + strlen(argv[i]);
     
-    // Allocate memory for the message
-    uint32_t actual_number_of_args = argc - 3;
-    uint32_t total_length = sizeof(uint32_t) + sizeof(uint32_t) + command_length;
-    void* message = malloc(total_length + sizeof(uint32_t));
+    // Allocate memory for the message = command length + number of arguments
+    uint32_t message_length = sizeof(uint32_t) + command_length;
+    void* message = malloc(message_length);
     if(!message)
         print_error_and_die("jobCommander : Error allocating memory for the message");
     
-    printf("Total length = %d\n", total_length);
-    printf("Command length = %d\n", command_length);
-    // Construct the message for writing
+
+    // Copy the number of arguments first
     void* temp = message;
+    uint32_t actual_number_of_args = argc - 4;
     memcpy(temp, &actual_number_of_args, sizeof(uint32_t));
     temp += sizeof(uint32_t);
+    
     for(int i = 3; i < argc; i++){
         size_t length = strlen(argv[i]);
         memcpy(temp, &length, sizeof(size_t));
@@ -186,52 +219,11 @@ void send_command(int sock, int argc, char** argv){
         temp += length;
     }
 
-    // Write the message to the server
-    printf("jobCommander : Writing the message to the server\n");
-    printf("Socket for communication : %d\n", sock);
+    uint32_t total_length = sizeof(uint32_t) + sizeof(uint32_t) + command_length;
     if((m_write(sock, message, total_length)) == -1)
         print_error_and_die("jobCommander : Error writing the message to the server");
 
-    printf("jobCommander : Message sent to the server\n");
     free(message);
-}
-
-/*
-    This function prints the file to the standard output.
-*/
-void print_file(char* file){
-    int file_descriptor;
-    if((file_descriptor = m_open(file, O_RDONLY)) == -1)
-        print_error_and_die("jobCommander : Error opening the file %s", file);
-    
-    char buffer[CHUNKSIZE];
-    ssize_t bytes_read;
-    while((bytes_read = read(file_descriptor, buffer, CHUNKSIZE)) > 0)
-        write(STDOUT_FILENO, buffer, bytes_read);
-    
-    if(bytes_read == -1)
-        print_error_and_die("jobCommander : Error reading the file %s", file);
-    
-    printf("\n");
-    
-    if(m_close(file_descriptor) == -1)
-        print_error_and_die("jobCommander : Error closing the file %s", file);
-}
-
-/*
-    This function initializes the file names for the output
-    and response files. The file names are in the format
-    /tmp/res_pid.txt and /tmp/out_pid.txt
-*/
-char* init_file_names(const char* pid, const char* type){
-    size_t length = strlen("/tmp/") + strlen(type) + strlen(pid) + strlen(".txt") + 1;
-    char* file = malloc(length + 1);
-    if(!file)
-        print_error_and_die("jobCommander : Error allocating memory for file");
-    
-    file[length] = '\0';
-    sprintf(file, "/tmp/%s_%s.txt", type, pid);
-    return file;
 }
 
 
@@ -251,7 +243,6 @@ void recieve_response(int sock, char* command){
         // Get pass the length of the message
         uint32_t length_of_message;
         memcpy(&length_of_message, buffer, sizeof(uint32_t));
-        printf("jobCommander : Length of message %d\n", length_of_message);
         
         char* response = malloc(length_of_message - sizeof(uint32_t) + 1);
         memcpy(response, buffer + sizeof(uint32_t), length_of_message - sizeof(uint32_t));
@@ -262,6 +253,7 @@ void recieve_response(int sock, char* command){
         free(buffer);
     }
     else if(strcmp(command, "poll") == 0){
+        // Read the number of jobs first
         uint32_t number_of_jobs;
         if(read(sock, &number_of_jobs, sizeof(uint32_t)) == -1)
             print_error_and_die("jobCommander : Error reading the number of jobs from the server");
@@ -272,13 +264,14 @@ void recieve_response(int sock, char* command){
                 print_error_and_die("jobCommander : Error reading the POLL message from the server");
             
             // Get pass the length of the message
-            uint32_t length_of_message;
-            memcpy(&length_of_message, buffer, sizeof(uint32_t));
-            printf("jobCommander : Length of message %d\n", length_of_message);
+            uint32_t length_of_buffer;
+            memcpy(&length_of_buffer, buffer, sizeof(uint32_t));
         
-            char* response = malloc(length_of_message - sizeof(uint32_t) + 1);
-            memcpy(response, buffer + sizeof(uint32_t), length_of_message - sizeof(uint32_t));
-            response[length_of_message - sizeof(uint32_t)] = '\0';
+            // Length of the message is the length of the buffer - bytes for the length
+            uint32_t length_of_message = length_of_buffer - sizeof(uint32_t);
+            char* response = malloc(length_of_message + 1);
+            memcpy(response, buffer + sizeof(uint32_t), length_of_message);
+            response[length_of_message] = '\0';
 
             printf("%s\n", response);
             free(response);
@@ -286,39 +279,38 @@ void recieve_response(int sock, char* command){
         }
         else{
             for(uint32_t i = 0; i < number_of_jobs; i++){
-                //! START JOBID
+                // JOBID 
                 if(m_read(sock, &buffer) == -1)
                     print_error_and_die("jobCommander : Error reading the POLL message from the server");
                 
-                uint32_t length_of_jobid;
-                memcpy(&length_of_jobid, buffer, sizeof(uint32_t));
-                length_of_jobid -= sizeof(uint32_t);
+                uint32_t length_of_buffer;
+                memcpy(&length_of_buffer, buffer, sizeof(uint32_t));
 
-                printf("Length of jobid = %d\n", length_of_jobid);
+                // Length of the message is the length of the buffer - bytes for the length
+                uint32_t length_of_jobid = length_of_buffer - sizeof(uint32_t);
                 char* jobid = malloc(length_of_jobid + 1);
                 if(!jobid)
                     print_error_and_die("jobCommander : Error allocating memory for jobid");
                 
                 memcpy(jobid, buffer + sizeof(uint32_t), length_of_jobid);
                 jobid[length_of_jobid] = '\0';
-                //! END JOBID
 
+                // Print the jobid and clean up
                 printf("<%s , ", jobid);
-                memset(buffer, 0, length_of_jobid + sizeof(uint32_t));
-                memset(jobid, 0, length_of_jobid);
-                free(jobid);
-                free(buffer);
+                memsetzero_and_free(buffer, length_of_buffer);
+                memsetzero_and_free((void*)jobid, length_of_jobid);
 
-                //! START JOB
-                // job may be coming in chunks
+                // JOB : Job may be coming in chunks. 
+                // For example job "ls -l /usr/bin/* /usr/local/bin/*" has a big length
                 while(true){
                     if(m_read(sock, &buffer) == -1)
                         print_error_and_die("jobCommander : Error reading the POLL message from the server");
                     
-                    // Get the length of the message
-                    uint32_t length_of_job;
-                    memcpy(&length_of_job, buffer, sizeof(uint32_t));
-                    length_of_job = length_of_job - sizeof(uint32_t) - sizeof(int);
+                    uint32_t length_of_buffer;
+                    memcpy(&length_of_buffer, buffer, sizeof(uint32_t));
+
+                    // Length of the message is the length of the buffer - bytes for the length - bytes for the type
+                    uint32_t length_of_job = length_of_buffer - sizeof(uint32_t) - sizeof(int);
 
                     // Get the type of message
                     int type;
@@ -340,23 +332,20 @@ void recieve_response(int sock, char* command){
                     else{
                         // End of response
                         printf("%s>\n", message);
-                        memset(buffer, 0, length_of_job + sizeof(uint32_t) + sizeof(int));
-                        memset(message, 0, length_of_job);
-                        free(message);
-                        free(buffer);
+                        memsetzero_and_free(buffer, length_of_buffer);
+                        memsetzero_and_free((void*)message, length_of_job);
                         break;
                     }
 
-                    // Memset to 0 before freeing
-                    memset(buffer, 0, length_of_job + sizeof(uint32_t) + sizeof(int));
-                    memset(message, 0, length_of_job);
-                    free(message);
-                    free(buffer);
+                    memsetzero_and_free(buffer, length_of_buffer);
+                    memsetzero_and_free((void*)message, length_of_job);
                 }
             }
         }
     }
     else{
+        // IssueJob command
+        // Find the pid of the process and make pid string
         pid_t pid = getpid();
         uint64_t digits = find_digits(pid);
         char* pid_string = malloc(digits + 1);
@@ -365,7 +354,7 @@ void recieve_response(int sock, char* command){
         
         sprintf(pid_string, "%d", pid);
 
-        // Initialize the file names
+        // Initialize the file names and open the files
         char* file_response = init_file_names(pid_string, "res");
         char* file_output = init_file_names(pid_string, "out");
     
@@ -379,16 +368,19 @@ void recieve_response(int sock, char* command){
         
         bool output_done = false, res_done = false, terminated = false;
 
+        // Read the response from the server. Response may be coming in many chunks
         while((!(output_done) || !(res_done)) && !(terminated)){
             void* buffer = NULL;
             if(m_read(sock, &buffer) == -1)
                 print_error_and_die("jobCommander : Error reading the response from the server");
             
-            // Get the length of the message
-            uint32_t length_of_message;
-            memcpy(&length_of_message, buffer, sizeof(uint32_t));
+            uint32_t length_of_buffer;
+            memcpy(&length_of_buffer, buffer, sizeof(uint32_t));
 
-            // Get type of message
+            // Length of the message is the length of the buffer - bytes for the length - bytes for the type
+            uint32_t length_of_message = length_of_buffer - sizeof(uint32_t) - sizeof(int);
+
+            // Get the type of message
             int type;
             memcpy(&type, buffer + sizeof(uint32_t), sizeof(int));
 
@@ -398,17 +390,17 @@ void recieve_response(int sock, char* command){
             // Check type to handle
             if(type == 1){
                 // Response chunk
-                if(write(fd_res, message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                if(write(fd_res, message, length_of_message) == -1)
                     print_error_and_die("jobCommander : Error writing to the file %s", file_response);
             }
             else if(type == 2){
                 // Output chunk
-                if(write(fd_out, message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                if(write(fd_out, message, length_of_message) == -1)
                     print_error_and_die("jobCommander : Error writing to the file %s", file_output);
             }
             else if(type == -1){
                 // End of response
-                if(write(fd_res, message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                if(write(fd_res, message, length_of_message) == -1)
                     print_error_and_die("jobCommander : Error writing to the file %s", file_response);
                 
                 res_done = true;
@@ -416,7 +408,7 @@ void recieve_response(int sock, char* command){
             }
             else if(type == -2){
                 // End of output
-                if(write(fd_out, message, length_of_message - sizeof(int) - sizeof(uint32_t)) == -1)
+                if(write(fd_out, message, length_of_message) == -1)
                     print_error_and_die("jobCommander : Error writing to the file %s", file_output);
                 
                 output_done = true;
@@ -425,23 +417,23 @@ void recieve_response(int sock, char* command){
             else if(type == 0){
                 // Termination before submitting the job
                 terminated = true;
-                uint32_t length = length_of_message - sizeof(int) - sizeof(uint32_t);
-                char* termination_message = malloc(length + 1);
+                char* termination_message = malloc(length_of_message + 1);
                 if(!termination_message)
                     print_error_and_die("jobCommander : Error allocating memory for termination_message");
                 
-                memcpy(termination_message, message, length);
-                termination_message[length] = '\0';
+                memcpy(termination_message, message, length_of_message);
+                termination_message[length_of_message] = '\0';
+
                 printf("%s\n", termination_message);
                 free(termination_message);
             }
 
             // Memset to 0 before freeing
-            memset(buffer, 0, length_of_message);
-            free(buffer);
+            memsetzero_and_free(buffer, length_of_buffer);
 
         }
 
+        // Close the files and remove them
         if(m_close(fd_res) == -1)
             print_error_and_die("jobCommander : Error closing the file %s", file_response);
         

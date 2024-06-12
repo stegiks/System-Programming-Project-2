@@ -1,4 +1,3 @@
-# Author : Stefanos Gkikas
 # Declare some path variables
 SRC := ./src
 INCLUDE := ./include
@@ -20,7 +19,7 @@ CFLAGS := -Wall -Wextra -Werror -g -pthread -lrt -I$(INCLUDE)
 # Targets
 SRC_FILES := $(wildcard $(SRC)/*.c)
 OBJ_FILES := $(patsubst $(SRC)/%.c,$(BUILD)/%.o,$(SRC_FILES))
-COMMANDER_OBJ_FILES := $(filter-out $(BUILD)/jobExecutorServer.o $(BUILD)/helpServer.o $(BUILD)/list_jobs.o, $(OBJ_FILES))
+COMMANDER_OBJ_FILES := $(filter-out $(BUILD)/jobExecutorServer.o $(BUILD)/helpServer.o $(BUILD)/queue.o $(BUILD)/serverController.o $(BUILD)/serverWorker.o, $(OBJ_FILES))
 SERVER_OBJ_FILES := $(filter-out $(BUILD)/jobCommander.o $(BUILD)/helpCommander.o, $(OBJ_FILES))
 
 # Compilation

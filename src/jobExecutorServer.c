@@ -1,9 +1,11 @@
 #include "../include/helpserver.h"
 
+// Global variables and Queue-Buffer
 bool terminate = false;
 int worker_threads_working = 0;
 int active_controller_threads = 0;
-List buffer_with_tasks = NULL;
+int concurrency = 1;
+Queue buffer_with_tasks = NULL;
 uint32_t buffer_size;
 uint32_t thread_pool_size;
 pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -21,17 +23,16 @@ pthread_cond_t controller_cond = PTHREAD_COND_INITIALIZER;
 int main(int argc, char* argv[]){
 
     if(!validate_arguments(argc, argv)){
-        print_error_and_die("jobExecutorServer : Invalid command line arguments\n"
-        "Usage: ./jobExecutorServer [portnum] [buffersize] [threadPoolSize]\n");
+        printf(BLUE "Usage: " RESET "jobExecutorServer [port] [buffer_size] [thread_pool_size]\n");
+        print_error_and_die("jobExecutorServer : Invalid command line arguments\n");
     }
-    printf("Arguments are valid\n");
 
     uint16_t port = atoi(argv[1]);
     buffer_size = atoi(argv[2]);
     thread_pool_size = atoi(argv[3]);
 
-    // Create the buffer as a List and the worker threads
-    buffer_with_tasks = createList(buffer_size);
+    // Create the buffer as a Queue and the worker threads
+    buffer_with_tasks = createQueue(buffer_size);
     
     pthread_t* worker_trheads;
     worker_trheads = malloc(thread_pool_size * sizeof(pthread_t));
@@ -39,16 +40,18 @@ int main(int argc, char* argv[]){
         if(pthread_create(&worker_trheads[i], NULL, worker_function, NULL))
             print_error_and_die("jobExecutorServer : Error creating worker thread number %d", i);
     
-    printf("Buffer and worker threads created\n");
     // Create socket, bind and listen
     int sock_server;
-    create_connection(&sock_server, port);
-
-    printf("Server listening on port %d\n", port);
+    if(!create_connection(&sock_server, port)){
+        // Possibly Address already in use
+        free(worker_trheads);
+        cleanQueue(buffer_with_tasks);
+        print_error_and_die("jobExecutorServer : Error creating connection");
+    }
 
     // While loop that accepts connections and creates controller threads.
     // Before that it checks for termination.
-    printf("Server is ready to accept connections in socket number %d\n", sock_server);
+    printf(GREEN "Server is running\n" RESET);
     while(1){
 
         pthread_mutex_lock(&terminate_mutex);
@@ -56,32 +59,29 @@ int main(int argc, char* argv[]){
             if(active_controller_threads > 0)
                 pthread_cond_wait(&controller_cond, &terminate_mutex);
             
-            printf("Server is terminating(1)\n");
             pthread_mutex_unlock(&terminate_mutex);
             break;
         }
         pthread_mutex_unlock(&terminate_mutex);
 
+        // Use accept to get a client socket
         int client_sock;
-        printf("Waiting for connection...\n");
         if((client_sock = accept(sock_server, NULL, NULL)) < 0){
-            pthread_mutex_lock(&terminate_mutex);
-            printf("Error accepting connection\n");
-            printf("errno = %d\n", errno);
-            if((errno == EINVAL) && terminate){
-                printf("Server socket closed\n");
 
+            // If accept fails, check for termination
+            pthread_mutex_lock(&terminate_mutex);
+            if((errno == EINVAL) && terminate){
                 if(active_controller_threads > 0)
                     pthread_cond_wait(&controller_cond, &terminate_mutex);
 
-                printf("Server is terminating(2)\n");
                 pthread_mutex_unlock(&terminate_mutex);
                 break;
             }
             pthread_mutex_unlock(&terminate_mutex);
+
             if(errno == EINTR)
                 continue;
-            else if(errno == EBADF){
+            else{
                 print_error_and_die("jobExecutorServer : Error accepting connection");
             }
         }
@@ -102,8 +102,7 @@ int main(int argc, char* argv[]){
             print_error_and_die("jobExecutorServer : Error detaching controller thread");
     }
 
-    printf("Got out!!!\n");
-    fflush(stdout);
+
     // Join worker threads
     for(uint32_t i = 0; i < thread_pool_size; i++){
         if(pthread_join(worker_trheads[i], NULL))
@@ -115,12 +114,10 @@ int main(int argc, char* argv[]){
     // Free worker threads array
     free(worker_trheads);
 
-    // Check if some controller threads managed to put 
-    // their jobs in the buffer after exit command was sent.
+    // Clean up : queue, mutexes and condition variables
     termination();
 
-    printf("I AM YOUR FATHER...\n");
-    printf("NOOOOO\n");
+    printf(RED "Server is terminating\n" RESET);
 
     return 0;
 }
