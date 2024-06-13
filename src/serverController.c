@@ -3,6 +3,27 @@
 uint32_t id = 1;
 
 /*
+    This function writes the message but with a int type in front.
+    Useful for functions like issueJob, stopJob, pollJob who want
+    to tell server what type of message is recieving.
+*/
+void sendMessageWithType(int fd, const char* message, int type, uint32_t size_message){
+    // Allocate memory for message and type
+    void* response = malloc(size_message + sizeof(int));
+    if(!response)
+        print_error_and_die("jobExecutorServer : Error allocating memory for response, sendMessageWithType");
+    
+    memcpy(response, &type, sizeof(int));
+    memcpy(response + sizeof(int), message, size_message);
+
+    uint32_t total_size = size_message + sizeof(int) + sizeof(uint32_t);
+    if(m_write(fd, response, total_size) == -1)
+        print_error_and_die("jobExecutorServer : Error writing response to client");
+    
+    memsetzero_and_free(response, size_message + sizeof(int));
+}
+
+/*
     Get the metadata information of the job and put it in the buffer.
 */
 void readCommand(int client_sock, void** buffer_start, void** buffer_ptr, uint32_t* length_of_message, uint32_t* number_of_args, size_t* length_of_command, char** command){
@@ -130,17 +151,8 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
         message[34] = '\0';
         int type = 0;
 
-        void* response = malloc(34 + sizeof(int));
-        if(!response)
-            print_error_and_die("jobExecutorServer : Error allocating memory for response");
-        
-        memcpy(response, &type, sizeof(int));
-        memcpy(response + sizeof(int), message, 34);
-
-        uint32_t total_size = 34 + sizeof(int) + sizeof(uint32_t);
-        printf(GREEN "Controller " RESET "%ld : Total size is %d\n", pthread_self(), total_size);
-        if(m_write(client_sock, response, total_size) == -1)
-            print_error_and_die("jobExecutorServer : Error writing response to client");
+        uint32_t size_to_write = (uint32_t)strlen(message);
+        sendMessageWithType(client_sock, message, type, size_to_write);
         
         // Tell controller_function not to wait for worker response
         pthread_mutex_lock(&job->thread_data->mutex);
@@ -149,7 +161,6 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
         pthread_mutex_unlock(&job->thread_data->mutex);
 
         // Clean up
-        free(response);
         free(job->jobid);
         free(job->command);
         for(uint32_t i = 0; i < job->number_of_args; i++)
@@ -201,22 +212,10 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
             type = -1;
         }
 
-        void* response = malloc(size_to_write + sizeof(int));
-        if(!response)
-            print_error_and_die("jobExecutorServer : Error allocating memory for response");
-        
-        memcpy(response, &type, sizeof(int));
-        memcpy(response + sizeof(int), message + bytes_written, size_to_write);
-
-        uint32_t total_size = size_to_write + sizeof(int) + sizeof(uint32_t);
-        printf(GREEN "Controller " RESET "%ld : Total size is %d\n", pthread_self(), total_size);
-        if(m_write(client_sock, response, total_size) == -1)
-            print_error_and_die("jobExecutorServer : Error writing response to client");
+        sendMessageWithType(client_sock, message + bytes_written, type, size_to_write);
         
         bytes_written += size_to_write;
         bytes_left -= size_to_write;
-
-        free(response);
     }
     
     printf(GREEN "Controller " RESET "%ld : Response written to client\n", pthread_self());
@@ -300,19 +299,9 @@ void stopJob(void* buffer, int client_sock){
             int type = -2;
             char message[45] = "JOB REMOVED BEFORE EXECUTION BY STOP COMMAND";
             message[44] = '\0';
-            void* removed_response = malloc(44 + sizeof(int));
-            if(!removed_response)
-                print_error_and_die("jobExecutorServer : Error allocating memory for removed_response");
-            
-            memcpy(removed_response, &type, sizeof(int));
-            memcpy(removed_response + sizeof(int), message, 44);
 
-            uint32_t total_size = 44 + sizeof(int) + sizeof(uint32_t);
-            printf(GREEN "Controller " RESET "%ld : Total size is %d\n", pthread_self(), total_size);
-            if(m_write(current->job->fd, removed_response, total_size) == -1)
-                print_error_and_die("jobExecutorServer : Error writing response to client");
-            
-            memsetzero_and_free(removed_response, 44 + sizeof(int));
+            uint32_t size_to_write = (uint32_t)strlen(message);
+            sendMessageWithType(current->job->fd, message, type, size_to_write);
             
             // Let the controller thread know that it doesn't have to wait for the worker response
             pthread_mutex_lock(&(current->job->thread_data->mutex));
@@ -422,22 +411,10 @@ void pollJob(int client_sock){
                     type = -1;
                 }
 
-                void* response = malloc(size_to_write + sizeof(int));
-                if(!response)
-                    print_error_and_die("jobExecutorServer : Error allocating memory for response");
-                
-                memcpy(response, &type, sizeof(int));
-                memcpy(response + sizeof(int), current->job->command + bytes_written, size_to_write);
-
-                uint32_t total_size = size_to_write + sizeof(int) + sizeof(uint32_t);
-                printf(GREEN "Controller " RESET "%ld : Total size is %d\n", pthread_self(), total_size);
-                if(m_write(client_sock, response, total_size)== -1)
-                    print_error_and_die("jobExecutorServer : Error writing response to client");
+                sendMessageWithType(client_sock, current->job->command + bytes_written, type, size_to_write);
                 
                 bytes_written += size_to_write;
                 bytes_left -= size_to_write;
-
-                free(response);
             }
             
             current = current->next;
@@ -483,31 +460,16 @@ void exitServer(int client_sock){
     // Iterate through the buffer, remove the jobs and send response
     pthread_mutex_lock(&buffer_mutex);
     QueueNode current = buffer_with_tasks->head;
-    length_of_message = 34;
+    // length_of_message = 34;
     while(current != NULL){
 
         // Send response : SERVER TERMINATED BEFORE EXECUTION
         int type = -2;
-        message = malloc(length_of_message + 1);
-        if(!message)
-            print_error_and_die("jobExecutorServer : Error allocating memory for message");
-        
-        sprintf(message, "SERVER TERMINATED BEFORE EXECUTION");
+        char message[35] = "SERVER TERMINATED BEFORE EXECUTION";
         message[34] = '\0';
 
-        void* response = malloc(34 + sizeof(int));
-        if(!response)
-            print_error_and_die("jobExecutorServer : Error allocating memory for response");
-        
-        memcpy(response, &type, sizeof(int));
-        memcpy(response + sizeof(int), message, 34);
-
-        total_size = length_of_message + sizeof(int) + sizeof(uint32_t);
-        if(m_write(current->job->fd, response, total_size) == -1)
-            print_error_and_die("jobExecutorServer : Error writing response to client");
-        
-        memsetzero_and_free(message, length_of_message);
-        memsetzero_and_free(response, 34 + sizeof(int));
+        uint32_t size_to_write = (uint32_t)strlen(message);
+        sendMessageWithType(current->job->fd, message, type, size_to_write);
 
         // Let the controller thread know that it doesn't have 
         // to wait for the worker response
