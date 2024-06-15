@@ -1,3 +1,7 @@
+I recomment reading from README.md for a more readable format
+either from VS Code or a markdown previewer online : 
+https://markdownlivepreview.com/
+
 # System Programming Project 2
 
 ## Student Information
