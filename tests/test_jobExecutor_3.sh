@@ -4,6 +4,6 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
-jobCommander localhost $1 issueJob ls -l /usr/bin/* /usr/local/bin/* /bin/* /sbin/* /opt/* /etc/* /usr/sbin/*
+../bin/jobCommander localhost $1 issueJob ls -l /usr/bin/* /usr/local/bin/* /bin/* /sbin/* /opt/* /etc/* /usr/sbin/*
 sleep 1
-jobCommander localhost $1 exit
+../bin/jobCommander localhost $1 exit

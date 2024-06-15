@@ -5,6 +5,6 @@ if [ $# -ne 1 ]; then
 fi
 
 killall progDelay
-jobCommander localhost $1 issueJob progDelay 10 &
-jobCommander localhost $1 stop job_2
-jobCommander localhost $1 exit
+../bin/jobCommander localhost $1 issueJob ../bin/progDelay 10 &
+../bin/jobCommander localhost $1 stop job_2
+../bin/jobCommander localhost $1 exit

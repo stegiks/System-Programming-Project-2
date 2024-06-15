@@ -6,16 +6,16 @@ fi
 
 # Again without sleeps you wont see the expectet output
 killall progDelay
-jobCommander localhost $1 issueJob progDelay 10 &
-jobCommander localhost $1 issueJob progDelay 10 &
-jobCommander localhost $1 issueJob progDelay 10 &
-jobCommander localhost $1 issueJob progDelay 10 &
-jobCommander localhost $1 issueJob progDelay 10 &
-jobCommander localhost $1 issueJob progDelay 10 &
-# sleep 1
-jobCommander localhost $1 setConcurrency 4
-jobCommander localhost $1 poll
-jobCommander localhost $1 stop job_4
-jobCommander localhost $1 stop job_5
-jobCommander localhost $1 poll
-jobCommander localhost $1 exit
+../bin/jobCommander localhost $1 issueJob ../bin/progDelay 10 &
+../bin/jobCommander localhost $1 issueJob ../bin/progDelay 10 &
+../bin/jobCommander localhost $1 issueJob ../bin/progDelay 10 &
+../bin/jobCommander localhost $1 issueJob ../bin/progDelay 10 &
+../bin/jobCommander localhost $1 issueJob ../bin/progDelay 10 &
+../bin/jobCommander localhost $1 issueJob ../bin/progDelay 10 &
+sleep 1
+../bin/jobCommander localhost $1 setConcurrency 4
+../bin/jobCommander localhost $1 poll
+../bin/jobCommander localhost $1 stop job_4
+../bin/jobCommander localhost $1 stop job_5
+../bin/jobCommander localhost $1 poll
+../bin/jobCommander localhost $1 exit

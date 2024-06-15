@@ -4,5 +4,5 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
-jobCommander localhost $1 issueJob progDelay 2
-jobCommander localhost $1 exit
+../bin/jobCommander localhost $1 issueJob ../bin/progDelay 2
+../bin/jobCommander localhost $1 exit

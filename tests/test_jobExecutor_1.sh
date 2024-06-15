@@ -4,8 +4,8 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
-jobCommander localhost $1 issueJob touch myFile.txt
+../bin/jobCommander localhost $1 issueJob touch myFile.txt
 ls ./myFile.txt
-jobCommander localhost $1 issueJob rm myFile.txt
+../bin/jobCommander localhost $1 issueJob rm myFile.txt
 ls ./myFile.txt
-jobCommander localhost $1 exit
+../bin/jobCommander localhost $1 exit

@@ -6,5 +6,5 @@ fi
 
 # This will fail : issueJob poll is not a valid command
 killall progDelay
-jobCommander localhost $1 issueJob poll
-jobCommander localhost $1 exit
+../bin/jobCommander localhost $1 issueJob poll
+../bin/jobCommander localhost $1 exit
