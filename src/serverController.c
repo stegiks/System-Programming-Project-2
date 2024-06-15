@@ -115,14 +115,12 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
 
     // Job ID
     pthread_mutex_lock(&global_vars_mutex);
-    printf(GREEN "Controller " RESET "%ld : Locked global_vars_mutex\n", pthread_self());
     uint64_t digits = find_digits(id);
     job->jobid = (char*)malloc(digits + 5);
     sprintf(job->jobid, "job_%d", id);
     job->jobid[digits + 4] = '\0';
 
     id++;
-    printf(GREEN "Controller " RESET "%ld : Unlocking global_vars_mutex\n", pthread_self());
     pthread_mutex_unlock(&global_vars_mutex);
 
     // Number of arguments and file descriptor
@@ -137,11 +135,9 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
 
     // Check if the buffer is full. If it is wait.
     pthread_mutex_lock(&buffer_mutex);
-    printf(GREEN "Controller " RESET "%ld : Locked buffer_mutex\n", pthread_self());
     while(isFull(buffer_with_tasks))
         pthread_cond_wait(&buffer_not_full, &buffer_mutex);
     
-    printf(GREEN "Controller " RESET "%ld : Unlocked buffer_mutex\n", pthread_self());
     pthread_mutex_unlock(&buffer_mutex);
 
     // Check for termination after potential broadcast by exitServer
@@ -175,15 +171,12 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
     
     // Enqueue the job
     pthread_mutex_lock(&buffer_mutex);
-    printf(GREEN "Controller " RESET "%ld : Locking buffer_mutex again\n", pthread_self());
     enqueue(buffer_with_tasks, job);
     pthread_cond_signal(&buffer_not_empty);
-    printf(GREEN "Controller " RESET "%ld : Unlocking buffer_mutex again\n", pthread_self());
     pthread_mutex_unlock(&buffer_mutex);
 
     // Send response : JOB <jobID, job> SUBMITTED
     uint32_t length_of_response = 18 + strlen(job->jobid) + strlen(job->command);
-    printf(GREEN "Controller " RESET "%ld : Length of response : %d\n", pthread_self(), length_of_response);
 
     // Construct the message
     char* message = malloc(length_of_response + 1);
@@ -218,7 +211,6 @@ void issueJob(void* buffer, int client_sock, uint32_t number_of_args, ThreadData
         bytes_left -= size_to_write;
     }
     
-    printf(GREEN "Controller " RESET "%ld : Response written to client\n", pthread_self());
     free(message);
 }
 
@@ -242,8 +234,6 @@ void setConcurrency(void* buffer, int client_sock){
     pthread_mutex_lock(&global_vars_mutex);
     int old_concurrency = concurrency;
     concurrency = atoi(new_concurrency);
-    printf(GREEN "Controller " RESET "%ld : The string of new concurrency is %s\n", pthread_self(), new_concurrency);
-    printf(GREEN "Controller " RESET "%ld : Concurrency set to %d\n", pthread_self(), concurrency);
 
     // Signal the worker threads to check the new concurrency
     if(old_concurrency < concurrency)
@@ -263,7 +253,6 @@ void setConcurrency(void* buffer, int client_sock){
     if(m_write(client_sock, (void*)message, lenght_of_response + sizeof(uint32_t)) == -1)
         print_error_and_die("jobExecutorServer : Error writing response to client");
     
-    printf(GREEN "Controller " RESET "%ld : message = %s\n", pthread_self(), message);
     free(new_concurrency);
     free(message);
 }
@@ -284,11 +273,8 @@ void stopJob(void* buffer, int client_sock){
     memcpy(jobid, buffer, length_of_jobid);
     jobid[length_of_jobid] = '\0';
 
-    printf(GREEN "Controller " RESET "%ld : Searching for a jobid with value = %s\n", pthread_self(), jobid);
-
     // Find the job in the shared buffer, so use the mutex for safety
     pthread_mutex_lock(&buffer_mutex);
-    printf(GREEN "Controller " RESET "%ld : Stop has locked buffer_mutex\n", pthread_self());
     QueueNode current = buffer_with_tasks->head;
     bool found = false;
     while(current != NULL){
@@ -317,7 +303,6 @@ void stopJob(void* buffer, int client_sock){
         }
         current = temp;
     }
-    printf(GREEN "Controller " RESET "%ld : Stop has unlocked buffer_mutex\n", pthread_self());
     pthread_mutex_unlock(&buffer_mutex);
 
     // Send response depending on the result
@@ -352,12 +337,10 @@ void pollJob(int client_sock){
     
     // First we find the number of jobs in the buffer 
     pthread_mutex_lock(&buffer_mutex);
-    printf(GREEN "Controller " RESET "%ld : Poll has locked buffer_mutex\n", pthread_self());
     uint32_t number_of_jobs = buffer_with_tasks->size;
 
     if(number_of_jobs == 0){
         // Here we can release the mutex because we are not going to change the buffer
-        printf(GREEN "Controller " RESET "%ld : Poll has unlocked buffer_mutex\n", pthread_self());
         pthread_mutex_unlock(&buffer_mutex);
 
         // Send response : [number of jobs] NO JOBS IN BUFFER
@@ -389,7 +372,6 @@ void pollJob(int client_sock){
             
             // Write the jobid
             uint32_t length_of_jobid = (uint32_t)strlen(current->job->jobid);
-            printf(GREEN "Controller " RESET "%ld : Length of jobid is %d\n", pthread_self(), length_of_jobid);
             if(m_write(client_sock, current->job->jobid, length_of_jobid + sizeof(uint32_t)) == -1)
                 print_error_and_die("jobExecutorServer : Error writing response to client");
             
@@ -420,8 +402,6 @@ void pollJob(int client_sock){
             current = current->next;
 
         }
-
-        printf(GREEN "Controller " RESET "%ld : Poll has unlocked buffer_mutex\n", pthread_self());
         pthread_mutex_unlock(&buffer_mutex);
     }
 }
@@ -544,15 +524,13 @@ void* controller_function(void* arg){
 
     // Check if the worker has finished writing 
     // the response to close the socket and free the memory
-    printf(GREEN "Controller " RESET "%ld : Controller thread finished\n", pthread_self());
     if(thread_data != NULL){
-        printf(GREEN "Controller " RESET "%ld : Waiting for worker to finish\n", pthread_self());
         pthread_mutex_lock(&(thread_data->mutex));
         while(!(thread_data->worker_response_ready))
             pthread_cond_wait(&(thread_data->cond), &(thread_data->mutex));
         
         pthread_mutex_unlock(&(thread_data->mutex));
-        printf(GREEN "Controller " RESET "%ld : Freeing thread_data controller\n", pthread_self());
+
         pthread_mutex_destroy(&(thread_data->mutex));
         pthread_cond_destroy(&(thread_data->cond));
         free(thread_data);
@@ -561,21 +539,16 @@ void* controller_function(void* arg){
     // Free the memory and close the socket
     if(m_close(client_sock) == -1)
         print_error_and_die("jobExecutorServer : Error closing client socket");
-    
-    printf(GREEN "Controller " RESET "%ld : Client socket closed\n", pthread_self());
 
 
     // Check for termination and close the server socket
     pthread_mutex_lock(&terminate_mutex);
     if((terminate) && (strcmp(command, "exit") == 0)){
         pthread_mutex_unlock(&terminate_mutex);
-        printf(GREEN "Controller " RESET "%ld : Socket number %d is closing\n", pthread_self(), sock_server);
         
         // Close the socket with shutdown
         if(shutdown(sock_server, SHUT_RD) == -1)
             print_error_and_die("jobExecutorServer : Error shutting down server socket");
-        
-        printf(GREEN "Controller " RESET "%ld : Server socket closed\n", pthread_self());
     }
     else{
         pthread_mutex_unlock(&terminate_mutex);
@@ -586,7 +559,6 @@ void* controller_function(void* arg){
 
     pthread_mutex_lock(&terminate_mutex);
     active_controller_threads--;
-    printf(GREEN "Controller " RESET "%ld : Active controller threads : %d\n", pthread_self(), active_controller_threads);
     if((terminate) && (active_controller_threads == 0))
         pthread_cond_signal(&controller_cond);
 

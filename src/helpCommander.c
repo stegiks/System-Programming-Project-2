@@ -100,13 +100,13 @@ void usage_commander() {
 */
 bool validate_command(int argc, char** argv, struct addrinfo** server_info){
     if(argc < 4){
-        printf("jobCommander : Invalid number of arguments\n");
+        perror("jobCommander : Invalid number of arguments\n");
         return false;
     }
 
     // Check if the port number is valid. 0 to 65535
     if(!isNumber(argv[2])){
-        printf("jobCommander : Port number must be a number\n");
+        perror("jobCommander : Port number must be a number\n");
         return false;
     }
 
@@ -123,7 +123,7 @@ bool validate_command(int argc, char** argv, struct addrinfo** server_info){
     hints.ai_flags = AI_CANONNAME;
     
     if(getaddrinfo(argv[1], argv[2], &hints, server_info) != 0){
-        printf("jobCommander : Hostname %s does not resolve to an IP address\n", argv[1]);
+        fprintf(stderr, "jobCommander : Hostname %s does not resolve to an IP address\n", argv[1]);
         return false;
     }
 
@@ -131,35 +131,35 @@ bool validate_command(int argc, char** argv, struct addrinfo** server_info){
     char* command = argv[3];
 
     if((strcmp(command, "issueJob") == 0) && (argc < 5)){
-        printf("jobCommander : issueJob command must have a job\n");
+        perror("jobCommander : issueJob command must have a job\n");
         return false;
     }
     else if(strcmp(command, "setConcurrency") == 0){
         if(argc < 5){
-            printf("jobCommander : setConcurrency command must have a number\n");
+            perror("jobCommander : setConcurrency command must have a number\n");
             return false;
         }
         
         if(!isNumber(argv[4])){
-            printf("jobCommander : setConcurrency command must have a number\n");
+            perror("jobCommander : setConcurrency command must have a number\n");
             return false;
         }
         
         int N = atoi(argv[4]);
         if(N < 1){
-            printf("jobCommander : N must be greater than 0\n");
+            perror("jobCommander : N must be greater than 0\n");
             return false;
         }
     }
     else if(strcmp(command, "stop") == 0){
         if(argc != 5){
-            printf("jobCommander : stop command must have a jobID\n");
+            perror("jobCommander : stop command must have a jobID\n");
             return false;
         }
     }
     else if((strcmp(command, "poll") == 0) || (strcmp(command, "exit") == 0)){
         if(argc != 4){
-            printf("jobCommander : %s command must not have any arguments\n", command);
+            fprintf(stderr, "jobCommander : %s command must not have any arguments\n", command);
             return false;
         }
     }

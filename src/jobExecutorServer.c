@@ -51,7 +51,7 @@ int main(int argc, char* argv[]){
 
     // While loop that accepts connections and creates controller threads.
     // Before that it checks for termination.
-    printf(GREEN "Server is running\n" RESET);
+    printf(GREEN "Server is running" RESET ".\n");
     while(1){
 
         pthread_mutex_lock(&terminate_mutex);
@@ -104,12 +104,9 @@ int main(int argc, char* argv[]){
 
 
     // Join worker threads
-    for(uint32_t i = 0; i < thread_pool_size; i++){
+    for(uint32_t i = 0; i < thread_pool_size; i++)
         if(pthread_join(worker_trheads[i], NULL))
             print_error_and_die("jobExecutorServer : Error joining worker thread number %d", i);
-
-        printf("Worker thread number %d joined\n", i);
-    }
 
     // Free worker threads array
     free(worker_trheads);
@@ -117,7 +114,7 @@ int main(int argc, char* argv[]){
     // Clean up : queue, mutexes and condition variables
     termination();
 
-    printf(RED "Server is terminating\n" RESET);
+    printf(RED "Server is terminating" RESET ".\n");
 
     return 0;
 }
