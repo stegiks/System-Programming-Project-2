@@ -522,6 +522,8 @@ void* controller_function(void* arg){
         exitServer(client_sock);
     }
 
+    free(buffer_start);
+
     // Check if the worker has finished writing 
     // the response to close the socket and free the memory
     if(thread_data != NULL){
@@ -555,7 +557,6 @@ void* controller_function(void* arg){
     }
 
     free(command);
-    free(buffer_start);
 
     pthread_mutex_lock(&terminate_mutex);
     active_controller_threads--;

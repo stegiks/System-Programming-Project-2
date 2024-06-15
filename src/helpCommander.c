@@ -130,9 +130,11 @@ bool validate_command(int argc, char** argv, struct addrinfo** server_info){
     // Check if the command is one of those that are supported by the jobCommander
     char* command = argv[3];
 
-    if((strcmp(command, "issueJob") == 0) && (argc < 5)){
-        perror("jobCommander : issueJob command must have a job\n");
-        return false;
+    if((strcmp(command, "issueJob") == 0)){
+        if(argc < 5){
+            perror("jobCommander : issueJob command must have a job\n");
+            return false;
+        }
     }
     else if(strcmp(command, "setConcurrency") == 0){
         if(argc < 5){
@@ -162,6 +164,10 @@ bool validate_command(int argc, char** argv, struct addrinfo** server_info){
             fprintf(stderr, "jobCommander : %s command must not have any arguments\n", command);
             return false;
         }
+    }
+    else{
+        fprintf(stderr, "jobCommander : %s command is not supported\n", command);
+        return false;
     }
 
     return true;

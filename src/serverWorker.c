@@ -34,43 +34,6 @@ void send_fixed_message(int fd, int type, const char* jobid_str, size_t length_o
 }
 
 /*
-    Functions that copies the contents of a node to a new job
-*/
-Job copyJob(QueueNode node){
-    Job job = (Job)malloc(sizeof(struct job));
-    if(!job)
-        print_error_and_die("jobExecutorServer : Error allocating memory for job");
-    
-    job->fd = node->job->fd;
-    job->jobid = strdup(node->job->jobid);
-    job->command = strdup(node->job->command);
-    job->arguments = (char**)malloc(sizeof(char*) * (node->job->number_of_args + 1));
-    if(!job->arguments)
-        print_error_and_die("jobExecutorServer : Error allocating memory for job arguments");
-    
-    for(uint32_t i = 0; i < node->job->number_of_args; i++)
-        job->arguments[i] = strdup(node->job->arguments[i]);
-    
-    job->arguments[node->job->number_of_args] = NULL;
-    job->number_of_args = node->job->number_of_args;
-    job->thread_data = node->job->thread_data;
-
-    return job;
-}
-
-/*
-    Function that frees the contents of a job
-*/
-void freeJob(Job job){
-    free(job->jobid);
-    free(job->command);
-    for(uint32_t i = 0; i < job->number_of_args; i++)
-        free(job->arguments[i]);
-    free(job->arguments);
-    free(job);
-}
-
-/*
     This is the funtion for worker threads that execute the jobs.
     They take a job from the buffer and make use of fork and exec 
     system calls. After the job is done they send the result to the client.
@@ -132,11 +95,6 @@ void* worker_function(){
             pthread_mutex_unlock(&buffer_mutex);
             continue;
         }
-
-        // Copy the contents of the node in local variables and free the node
-        Job job = copyJob(queuejob);
-        freeQueueNode(queuejob);
-
         // Signal the controller thread that more space is available in the buffer
         pthread_cond_signal(&buffer_not_full);
         pthread_mutex_unlock(&buffer_mutex);
@@ -170,7 +128,7 @@ void* worker_function(){
             }
 
             // Execute the job
-            execvp(job->arguments[0], job->arguments);
+            execvp(queuejob->job->arguments[0], queuejob->job->arguments);
 
             // Use _exit to avoid cleanups that may affect the parent
             perror("jobExecutorServer : Error executing job");
@@ -191,8 +149,8 @@ void* worker_function(){
                 print_error_and_die("jobExecutorServer : Error opening file %s", filename);
 
             // Write start message : "-----jobid output start-----\n"
-            size_t len_of_jobid = strlen(job->jobid);
-            send_fixed_message(job->fd, 2, job->jobid, len_of_jobid);
+            size_t len_of_jobid = strlen(queuejob->job->jobid);
+            send_fixed_message(queuejob->job->fd, 2, queuejob->job->jobid, len_of_jobid);
 
             // Send output of the job in chunks
             while(true){
@@ -214,24 +172,24 @@ void* worker_function(){
 
                 // Write the chunk
                 uint32_t total_size = n + sizeof(int) + sizeof(uint32_t);
-                if(m_write(job->fd, buffer, total_size) == -1)
+                if(m_write(queuejob->job->fd, buffer, total_size) == -1)
                     print_error_and_die("jobExecutorServer : Error writing output chunk to client");
                 
                 memsetzero_and_free(buffer, CHUNKSIZE + sizeof(int));
             }
 
             // Write end message : "-----jobid output end-----\n"
-            send_fixed_message(job->fd, -2, job->jobid, len_of_jobid);
+            send_fixed_message(queuejob->job->fd, -2, queuejob->job->jobid, len_of_jobid);
 
             // Signal the controller thread that the response is ready
             // so that it can close the socket
-            pthread_mutex_lock(&(job->thread_data->mutex));
-            job->thread_data->worker_response_ready = true;
-            pthread_cond_signal(&(job->thread_data->cond));
-            pthread_mutex_unlock(&(job->thread_data->mutex));
+            pthread_mutex_lock(&(queuejob->job->thread_data->mutex));
+            queuejob->job->thread_data->worker_response_ready = true;
+            pthread_cond_signal(&(queuejob->job->thread_data->cond));
+            pthread_mutex_unlock(&(queuejob->job->thread_data->mutex));
 
-            // Free job and close file
-            freeJob(job);
+            // Free the job and the queue node
+            freeQueueNode(queuejob);
 
             if(m_close(fd) == -1)
                 print_error_and_die("jobExecutorServer : Error closing file %s", filename);
