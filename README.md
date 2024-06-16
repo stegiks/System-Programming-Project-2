@@ -134,4 +134,8 @@ There are also four condition variables used:
 These synchronization techniques ensure that the program operates correctly in a multithreaded environment, preventing race conditions and ensuring that threads can cooperate effectively.
 
 > __NOTE__ : Mutexes and condition variables are used in [ThreadData struct](include/queue.h) also, but they are kind of special as their unique for every __issueJob__ command and their only purpose, as mentioned before, is to make sure that the controller thread waits for the worker thread to finish its job before closing the socket.
-> 
+>
+
+## Testing
+
+Finally, the project has a __`tests`__ folder where I have all the tests from the previous project, two new tests that I have added and a __run_executor.sh__ script that runs the server. Port must be provided for every test and and the server name is __localhost__. In run_executor.sh script, you must provide __port__, __buffer size__ and __thread pool size__ as arguments. In some tests I have added __&__ in the end of the command and when sleep is not used in this case, the results will not be the same every time mainly because of __issueJob__ command. 

@@ -18,6 +18,7 @@ void print_file(char* file){
         print_error_and_die("jobCommander : Error reading the file %s", file);
     
     printf("\n\n");
+    fflush(stdout);
     
     if(m_close(file_descriptor) == -1)
         print_error_and_die("jobCommander : Error closing the file %s", file);
